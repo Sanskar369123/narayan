@@ -1,16 +1,17 @@
 import streamlit as st
-import requests
 import pandas as pd
+import requests
+import numpy as np
+import faiss
 import re
 
 # ---------------------
-# Load / Normalize car dataset
+# Load + Normalize CSV
 # ---------------------
 @st.cache_data
 def load_data():
     df = pd.read_csv("cars.csv")
 
-    # Normalize column names: city → city, Fuel Type → fuel_type, etc.
     df.columns = (
         df.columns
         .str.strip()
@@ -25,172 +26,136 @@ cars = load_data()
 
 
 # ---------------------
-# Initialize user criteria
+# Convert each row → text chunk
 # ---------------------
-if "criteria" not in st.session_state:
-    st.session_state.criteria = {
-        "budget_min": None,
-        "budget_max": None,
-        "city": None,
-        "fuel_type": None,
-        "transmission_type": None,
-        "make": None,
-    }
+def row_to_text(row):
+    return f"""
+Car ID: {row.get('lead')}
+City: {row.get('city')}
+Make: {row.get('make')}
+Model: {row.get('model')}
+Variant: {row.get('variant')}
+Year: {row.get('make_year')}
+Fuel: {row.get('fuel_type')}
+Transmission: {row.get('transmission_type')}
+Mileage: {row.get('mileage')} km
+Ownership: {row.get('ownership')}
+Price: {row.get('procurement_price')}
+"""
 
 
-# ---------------------
-# Filter Cars Function
-# ---------------------
-def filter_cars():
-    df = cars.copy()
-    c = st.session_state.criteria
-
-    if c["budget_min"] and c["budget_max"]:
-        df = df[
-            (df["procurement_price"] >= c["budget_min"]) &
-            (df["procurement_price"] <= c["budget_max"])
-        ]
-
-    if c["city"]:
-        df = df[df["city"].str.contains(c["city"], case=False, na=False)]
-
-    if c["fuel_type"]:
-        df = df[df["fuel_type"].str.contains(c["fuel_type"], case=False, na=False)]
-
-    if c["transmission_type"]:
-        df = df[df["transmission_type"].str.contains(c["transmission_type"], case=False, na=False)]
-
-    if c["make"]:
-        df = df[df["make"].str.contains(c["make"], case=False, na=False)]
-
-    return df.head(10)
+car_texts = [row_to_text(row) for _, row in cars.iterrows()]
 
 
 # ---------------------
-# LLM API Call (OpenRouter)
+# Embedding function (OpenRouter)
 # ---------------------
-def ask_llm(messages):
-    url = "https://openrouter.ai/api/v1/chat/completions"
+def embed_text(texts):
+    url = "https://openrouter.ai/api/v1/embeddings"
 
     headers = {
         "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
         "HTTP-Referer": "http://localhost:8501",
-        "X-Title": "Spinny AI Car Advisor"
+        "X-Title": "Spinny RAG Search"
     }
 
     payload = {
-        "model": "qwen/qwen-turbo",
-        "messages": messages
+        "model": "openai/text-embedding-3-small",
+        "input": texts,
     }
 
     response = requests.post(url, json=payload, headers=headers)
     data = response.json()
 
+    return np.array([item["embedding"] for item in data["data"]]).astype("float32")
+
+
+# ---------------------
+# Create embeddings and FAISS index
+# ---------------------
+@st.cache_resource
+def build_faiss():
+    embeddings = embed_text(car_texts)
+
+    dimension = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
+
+    return index, embeddings
+
+
+index, embeddings = build_faiss()
+
+
+# ---------------------
+# Search most relevant cars
+# ---------------------
+def search_car(query, k=5):
+    query_embed = embed_text([query])[0].reshape(1, -1)
+    distances, results = index.search(query_embed, k)
+
+    matched_texts = [car_texts[i] for i in results[0]]
+    matched_rows = [cars.iloc[i] for i in results[0]]
+
+    return matched_texts, matched_rows
+
+
+# ---------------------
+# LLM call with context-injection
+# ---------------------
+def ask_llm_with_context(user_query, context_blocks):
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
+    context_str = "\n\n".join(context_blocks)
+
+    system_prompt = f"""
+You are Spinny AI.
+Answer ONLY using the car data provided below.
+Never invent information.
+Never reference cars that are not included in the context.
+
+CONTEXT:
+{context_str}
+"""
+
+    payload = {
+        "model": "z-ai/glm-4.5-air:free",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_query}
+        ]
+    }
+
+    headers = {
+        "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
+        "HTTP-Referer": "http://localhost:8501",
+        "X-Title": "Spinny Car RAG"
+    }
+
+    response = requests.post(url, json=payload, headers=headers)
+    data = response.json()
     return data["choices"][0]["message"]["content"]
-
-
-# ---------------------
-# Extract Criteria from User Text
-# ---------------------
-def extract_criteria(text):
-    text = text.lower()
-    c = st.session_state.criteria
-
-    # Budget pattern: "4-6 lakhs" or "4 to 6 lakh"
-    budget_match = re.findall(r"(\d+)\s*[-to]+\s*(\d+)", text)
-    if budget_match:
-        low, high = budget_match[0]
-        c["budget_min"] = int(low) * 100000
-        c["budget_max"] = int(high) * 100000
-
-    # City
-    if "city" in cars.columns:
-        for city in cars["city"].dropna().unique():
-            if city.lower() in text:
-                c["city"] = city
-
-    # Fuel type
-    for f in ["petrol", "diesel", "cng", "electric"]:
-        if f in text:
-            c["fuel_type"] = f
-
-    # Transmission
-    for t in ["automatic", "manual"]:
-        if t in text:
-            c["transmission_type"] = t
-
-    # Make (Honda, Hyundai, etc.)
-    if "make" in cars.columns:
-        for make in cars["make"].dropna().unique():
-            if make.lower() in text:
-                c["make"] = make
 
 
 # ---------------------
 # Streamlit UI
 # ---------------------
-st.title("🚗 Spinny AI — Car Advisor MVP")
-st.write("Chat with the AI agent to find your perfect car!")
+st.title("🚗 Spinny AI — Car Advisor (RAG Powered)")
+st.write("Ask anything about cars in your dataset — I will answer ONLY from your CSV.")
 
-# Chat history
-if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {
-            "role": "system",
-            "content": """
-You are Spinny AI.
+query = st.chat_input("Ask something like: 'Petrol Honda cars under 5 lakh in Delhi'")
 
-Ask ONE question at a time.
-Collect these in order:
-1. Budget
-2. City
-3. Fuel type
-4. Transmission type
-5. Car make preference
+if query:
+    st.chat_message("user").write(query)
 
-Do NOT recommend cars yourself. 
-When all 5 are collected, say: "Great! Let me fetch the best cars for you."
-"""
-        },
-        {
-            "role": "assistant",
-            "content": "Hi! I’m Spinny AI 😊 Let's find your perfect car. What is your budget range?"
-        }
-    ]
+    # Step 1: RAG Search
+    context_blocks, rows = search_car(query, k=5)
 
-# Display only assistant & user messages (clean UI)
-for msg in st.session_state.messages:
-    if msg["role"] in ["assistant", "user"]:
-        st.chat_message(msg["role"]).write(msg["content"])
+    # Step 2: Answer using LLM with context
+    llm_answer = ask_llm_with_context(query, context_blocks)
 
+    st.chat_message("assistant").write(llm_answer)
 
-# ---------------------
-# User Input Handler
-# ---------------------
-user_input = st.chat_input("Type your reply...")
-
-if user_input:
-    # Add user message to conversation
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    # Extract criteria
-    extract_criteria(user_input)
-
-    # If all 5 questions answered → show results
-    c = st.session_state.criteria
-    if all(c.values()):
-        st.chat_message("assistant").write("Great! Let me fetch the best cars for you 🚗")
-
-        results = filter_cars()
-
-        if len(results) == 0:
-            st.error("No cars found matching your preferences 😢")
-        else:
-            st.success("Here are your best matches:")
-            st.dataframe(results)
-
-    else:
-        # Otherwise, ask next question
-        reply = ask_llm(st.session_state.messages)
-        st.session_state.messages.append({"role": "assistant", "content": reply})
-        st.chat_message("assistant").write(reply)
+    # Step 3: Show retrieved cars
+    st.subheader("🔎 Cars considered for this answer")
+    st.dataframe(pd.DataFrame(rows))
