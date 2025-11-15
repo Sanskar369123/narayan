@@ -102,7 +102,12 @@ RULES:
     ]
 
 for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+    if msg["role"] == "assistant":
+        st.chat_message("assistant").write(msg["content"])
+    elif msg["role"] == "user":
+        st.chat_message("user").write(msg["content"])
+    # ❌ Do NOT display system messages
+
 
 # ---------------------
 # Extract user preferences automatically
