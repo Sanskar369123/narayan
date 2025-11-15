@@ -12,7 +12,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @st.cache_data
 def load_cars():
-    return pd.read_csv("data/cars.csv")
+    return pd.read_csv("cars.csv")
 
 cars_df = load_cars()
 
