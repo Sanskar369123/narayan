@@ -1,222 +1,176 @@
 import streamlit as st
 import pandas as pd
-import requests
-import numpy as np
-import re
+import json
+from openai import OpenAI
+import os
 
-# ---------------------
-# Load + Normalize CSV
-# ---------------------
+# --------------------- SETUP ---------------------
+st.set_page_config(page_title="Spinny AI Car Advisor", page_icon="🚗")
+
+# load OpenAI client using environment var
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 @st.cache_data
-def load_data():
-    df = pd.read_csv("cars.csv")
-    df.columns = (
-        df.columns
-        .str.strip()
-        .str.lower()
-        .str.replace(" ", "_")
-        .str.replace("\ufeff", "", regex=False)
-    )
-    return df
+def load_cars():
+    return pd.read_csv("data/cars.csv")
 
-cars = load_data()
+cars_df = load_cars()
 
-# ---------------------
-# Convert car row -> text block
-# ---------------------
-def row_to_text(row):
-    return f"""
-Car ID: {row.get('lead')}
-City: {row.get('city')}
-Make: {row.get('make')}
-Model: {row.get('model')}
-Variant: {row.get('variant')}
-Year: {row.get('make_year')}
-Fuel: {row.get('fuel_type')}
-Transmission: {row.get('transmission_type')}
-Mileage: {row.get('mileage')} km
-Ownership: {row.get('ownership')}
-Price: ₹{row.get('procurement_price')}
-"""
-
-car_texts = [row_to_text(row) for _, row in cars.iterrows()]
-
-
-# ---------------------
-# FREE KEYWORD SCORING SEARCH
-# ---------------------
-def score_car(car_text, query):
-    score = 0
-    for word in query.lower().split():
-        if word in car_text.lower():
-            score += 1
-    return score
-
-
-def search_car(query, k=10):
-    scores = [(score_car(text, query), i) for i, text in enumerate(car_texts)]
-    scores.sort(reverse=True, key=lambda x: x[0])
-
-    top_idx = [i for score, i in scores[:k] if score > 0]
-
-    matched_texts = [car_texts[i] for i in top_idx]
-    matched_rows = [cars.iloc[i] for i in top_idx]
-
-    return matched_texts, matched_rows
-
-
-# ---------------------
-# LLM call (z-ai/glm-4.5-air:free)
-# ---------------------
-def call_llm(system_prompt, user_prompt):
-    url = "https://openrouter.ai/api/v1/chat/completions"
-
-    payload = {
-        "model": "z-ai/glm-4.5-air:free",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ]
-    }
-
-    headers = {
-        "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
-        "HTTP-Referer": "http://localhost:8501",
-        "X-Title": "Spinny Car Advisor"
-    }
-
-    response = requests.post(url, json=payload, headers=headers)
-    data = response.json()
-
-    return data["choices"][0]["message"]["content"]
-
-
-# ---------------------
-# Initialize conversational criteria
-# ---------------------
-if "criteria" not in st.session_state:
-    st.session_state.criteria = {
-        "budget": None,
-        "city": None,
-        "fuel": None,
-        "transmission": None,
-        "make": None
-    }
-
-if "stage" not in st.session_state:
-    st.session_state.stage = "ask_budget"
-
+# --------------------- SESSION STATE ---------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
+if "preferences" not in st.session_state:
+    st.session_state.preferences = {}
+if "stage" not in st.session_state:
+    st.session_state.stage = "collecting"
+
+# --------------------- PROMPT ---------------------
+SYSTEM_PROMPT = """
+You are Spinny's AI Car Consultant.
+
+Your job:
+1. Ask friendly questions to understand user's ideal car.
+2. Extract structured fields from user messages:
+   - budget_min (int)
+   - budget_max (int)
+   - city (string)
+   - fuel_type (Petrol/Diesel/CNG/Electric/Any)
+   - body_type (Hatchback/Sedan/SUV/MPV/Any)
+   - seats_min (int)
+3. Output a conversational reply.
+4. At the END, output ONLY a JSON object as last line (no explanation).
+
+If no new info found, output {} as JSON.
+"""
+
+# --------------------- LLM CALL ---------------------
+def call_llm(conversation):
+    response = client.chat.completions.create(
+        model="meituan/longcat-flash-chat:free",
+        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation,
+        temperature=0.4,
+    )
+    return response.choices[0].message.content
 
 
-# ---------------------
-# Ask next question
-# ---------------------
-def ask_next_question():
-    if st.session_state.stage == "ask_budget":
-        return "What is your budget range?"
-    if st.session_state.stage == "ask_city":
-        return "Which city are you looking to buy the car in?"
-    if st.session_state.stage == "ask_fuel":
-        return "What fuel type do you prefer? (Petrol / Diesel / CNG)"
-    if st.session_state.stage == "ask_transmission":
-        return "What transmission type do you prefer? (Manual / Automatic)"
-    if st.session_state.stage == "ask_make":
-        return "Do you prefer any particular car brand? (Honda, Maruti, Hyundai, etc.)"
-    return None
+def parse_json_from_message(content: str):
+    lines = content.splitlines()
+    last = lines[-1].strip()
+
+    try:
+        prefs = json.loads(last)
+        chat_text = "\n".join(lines[:-1]).strip()
+        return chat_text, prefs
+    except:
+        # no json found
+        return content, {}
 
 
-# ---------------------
-# Extract details from user message
-# ---------------------
-def extract_answer(stage, user_input):
-    text = user_input.lower()
-    c = st.session_state.criteria
-
-    if stage == "ask_budget":
-        match = re.findall(r"(\d+)", text)
-        if match:
-            c["budget"] = match[0]  # store numeric value
-            st.session_state.stage = "ask_city"
-            return True
-
-    if stage == "ask_city":
-        c["city"] = text
-        st.session_state.stage = "ask_fuel"
-        return True
-
-    if stage == "ask_fuel":
-        if "petrol" in text:
-            c["fuel"] = "petrol"
-        elif "diesel" in text:
-            c["fuel"] = "diesel"
-        elif "cng" in text:
-            c["fuel"] = "cng"
-        st.session_state.stage = "ask_transmission"
-        return True
-
-    if stage == "ask_transmission":
-        if "auto" in text:
-            c["transmission"] = "automatic"
-        else:
-            c["transmission"] = "manual"
-        st.session_state.stage = "ask_make"
-        return True
-
-    if stage == "ask_make":
-        c["make"] = text
-        st.session_state.stage = "search"
-        return True
-
-    return False
+def merge_prefs(current, new):
+    for k, v in new.items():
+        if v not in ["", None]:
+            current[k] = v
+    return current
 
 
-# ---------------------
-# Streamlit UI
-# ---------------------
-st.title("🚗 Spinny AI — Personal Car Consultant")
+def enough_prefs(prefs):
+    return "budget_max" in prefs and "city" in prefs
 
-# Display chat
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+
+# --------------------- FILTER LOGIC ---------------------
+def filter_cars(prefs, df):
+    filtered = df.copy()
+
+    if "budget_min" in prefs:
+        filtered = filtered[filtered["price"] >= int(prefs["budget_min"])]
+
+    if "budget_max" in prefs:
+        filtered = filtered[filtered["price"] <= int(prefs["budget_max"])]
+
+    if "city" in prefs:
+        filtered = filtered[filtered["city"].str.contains(prefs["city"], case=False, na=False)]
+
+    if "fuel_type" in prefs and prefs["fuel_type"].lower() != "any":
+        filtered = filtered[filtered["fuel_type"].str.contains(prefs["fuel_type"], case=False)]
+
+    if "body_type" in prefs and prefs["body_type"].lower() != "any":
+        filtered = filtered[filtered["body_type"].str.contains(prefs["body_type"], case=False)]
+
+    if "seats_min" in prefs:
+        filtered = filtered[filtered["seats"] >= int(prefs["seats_min"])]
+
+    return filtered
+
+
+def pretty_car(row):
+    return (
+        f"**{row['make']} {row['model']} {row['year']}**\n"
+        f"- Price: ₹{int(row['price']):,}\n"
+        f"- Fuel: {row['fuel_type']} | Body: {row['body_type']}\n"
+        f"- Seats: {row['seats']} | Km Driven: {row['km_driven']:,}\n"
+        f"- City: {row['city']} | Hub: {row['hub_name']}"
+    )
+
+
+# --------------------- UI ---------------------
+st.title("🚗 Spinny AI Car Advisor (Chat-Only MVP)")
+
+# Display past chat
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
 
 # Chat input
-user_input = st.chat_input("Your answer...")
+if prompt := st.chat_input("Tell me what kind of car you want..."):
 
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.messages.append({"role": "user", "content": prompt})
 
-    # Process answer
-    extract_answer(st.session_state.stage, user_input)
+    # ---- If we are still collecting preferences ----
+    if st.session_state.stage == "collecting":
 
-    # Next stage?
-    if st.session_state.stage != "search":
-        question = ask_next_question()
-        st.session_state.messages.append({"role": "assistant", "content": question})
-        st.chat_message("assistant").write(question)
+        llm_output = call_llm(st.session_state.messages)
+        visible, new_prefs = parse_json_from_message(llm_output)
 
+        st.session_state.preferences = merge_prefs(st.session_state.preferences, new_prefs)
+
+        # Show assistant message
+        with st.chat_message("assistant"):
+            st.markdown(visible)
+        st.session_state.messages.append({"role": "assistant", "content": visible})
+
+        # If enough prefs → Recommend cars
+        if enough_prefs(st.session_state.preferences):
+            st.session_state.stage = "recommended"
+
+            matches = filter_cars(st.session_state.preferences, cars_df)
+
+            with st.chat_message("assistant"):
+                if len(matches) == 0:
+                    st.markdown("I didn't find matches in your city — but I found options in other hubs:")
+
+                    relaxed = dict(st.session_state.preferences)
+                    relaxed.pop("city", None)
+                    alt = filter_cars(relaxed, cars_df).head(5)
+
+                    if len(alt) == 0:
+                        st.markdown("Still nothing. Try increasing budget or changing body type.")
+                    else:
+                        for _, row in alt.iterrows():
+                            st.markdown(pretty_car(row))
+                else:
+                    st.markdown("Here are the best matches for you:")
+                    for _, row in matches.head(5).iterrows():
+                        st.markdown(pretty_car(row))
+
+    # ---- Already recommended, now just follow-up chat ----
     else:
-        # Build final search query
-        c = st.session_state.criteria
-        search_query = f"{c['budget']} budget {c['city']} {c['fuel']} {c['transmission']} {c['make']}"
+        followup_prompt = [
+            {"role": "system", "content": "You already recommended cars. Continue conversation helpfully."}
+        ] + st.session_state.messages
 
-        # Search cars
-        context_blocks, rows = search_car(search_query, k=10)
+        reply = call_llm(followup_prompt)
 
-        if len(rows) == 0:
-            answer = "No matching cars found in your budget. Try changing your preferences."
-        else:
-            # LLM contextual answer
-            context = "\n\n".join(context_blocks)
-            answer = call_llm(
-                system_prompt=f"You are a car advisor. Use ONLY this data:\n{context}",
-                user_prompt="Recommend the best car from the above list."
-            )
+        with st.chat_message("assistant"):
+            st.markdown(reply)
 
-        st.session_state.messages.append({"role": "assistant", "content": answer})
-        st.chat_message("assistant").write(answer)
-
-        # Show matched cars
-        st.subheader("🔎 Cars matched to your needs")
-        st.dataframe(pd.DataFrame(rows))
+        st.session_state.messages.append({"role": "assistant", "content": reply})
