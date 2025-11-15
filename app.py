@@ -15,24 +15,31 @@ cars = load_data()
 # OpenRouter Call
 # ---------------------
 def ask_llm(messages):
-    url = "https://openrouter.ai/api/v1"
+    url = "https://openrouter.ai/api/v1/chat/completions"
+
     headers = {
         "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
+        "HTTP-Referer": "http://localhost:8501",
+        "X-Title": "Spinny AI Car Advisor"
     }
 
     payload = {
-        "model": "z-ai/glm-4.5-air:free",     # You can change model
+        "model": "z-ai/glm-4.5-air:free",   # fast + cheap + good (free tier available)
         "messages": messages
     }
 
     response = requests.post(url, json=payload, headers=headers)
-    return response.json()["choices"][0]["message"]["content"]
+
+    # Debug raw response if needed
+    # st.write("RAW:", response.text)
+
+    data = response.json()
+    return data["choices"][0]["message"]["content"]
 
 # ---------------------
 # Streamlit UI
 # ---------------------
 st.title("🚗 Spinny AI — Car Advisor MVP")
-
 st.write("Chat with the AI agent to find your perfect car!")
 
 if "messages" not in st.session_state:
@@ -43,10 +50,7 @@ if "messages" not in st.session_state:
 
 # Chat history
 for msg in st.session_state.messages:
-    if msg["role"] == "assistant":
-        st.chat_message("assistant").write(msg["content"])
-    elif msg["role"] == "user":
-        st.chat_message("user").write(msg["content"])
+    st.chat_message(msg["role"]).write(msg["content"])
 
 # User input
 user_input = st.chat_input("Type your question...")
@@ -55,12 +59,12 @@ if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
 
     llm_reply = ask_llm(st.session_state.messages)
-    st.session_state.messages.append({"role": "assistant", "content": llm_reply})
 
+    st.session_state.messages.append({"role": "assistant", "content": llm_reply})
     st.chat_message("assistant").write(llm_reply)
 
 # -------------------------
-# Optional car recommendation function
+# Optional car recommendation
 # -------------------------
 def filter_cars(criteria):
     result = cars.copy()
