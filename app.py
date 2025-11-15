@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import requests
 import numpy as np
-import faiss
 import re
 
 # ---------------------
@@ -26,7 +25,7 @@ cars = load_data()
 
 
 # ---------------------
-# Convert each row → text chunk
+# Convert each row → text chunk for RAG
 # ---------------------
 def row_to_text(row):
     return f"""
@@ -43,12 +42,11 @@ Ownership: {row.get('ownership')}
 Price: {row.get('procurement_price')}
 """
 
-
 car_texts = [row_to_text(row) for _, row in cars.iterrows()]
 
 
 # ---------------------
-# Embedding function (OpenRouter)
+# Embedding Function (OpenRouter)
 # ---------------------
 def embed_text(texts):
     url = "https://openrouter.ai/api/v1/embeddings"
@@ -71,37 +69,40 @@ def embed_text(texts):
 
 
 # ---------------------
-# Create embeddings and FAISS index
+# Build embeddings once
 # ---------------------
 @st.cache_resource
-def build_faiss():
+def build_embeddings():
     embeddings = embed_text(car_texts)
+    return embeddings
 
-    dimension = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dimension)
-    index.add(embeddings)
-
-    return index, embeddings
-
-
-index, embeddings = build_faiss()
+car_embeddings = build_embeddings()
 
 
 # ---------------------
-# Search most relevant cars
+# Cosine Similarity Search (NO FAISS)
 # ---------------------
+def cosine_similarity(a, b):
+    a_norm = a / np.linalg.norm(a)
+    b_norm = b / np.linalg.norm(b, axis=1, keepdims=True)
+    return np.dot(b_norm, a_norm)
+
+
 def search_car(query, k=5):
-    query_embed = embed_text([query])[0].reshape(1, -1)
-    distances, results = index.search(query_embed, k)
+    query_vec = embed_text([query])[0]
 
-    matched_texts = [car_texts[i] for i in results[0]]
-    matched_rows = [cars.iloc[i] for i in results[0]]
+    scores = cosine_similarity(query_vec, car_embeddings)
+
+    top_k_idx = np.argsort(scores)[-k:][::-1]
+
+    matched_texts = [car_texts[i] for i in top_k_idx]
+    matched_rows = [cars.iloc[i] for i in top_k_idx]
 
     return matched_texts, matched_rows
 
 
 # ---------------------
-# LLM call with context-injection
+# LLM with RAG Context
 # ---------------------
 def ask_llm_with_context(user_query, context_blocks):
     url = "https://openrouter.ai/api/v1/chat/completions"
@@ -110,9 +111,9 @@ def ask_llm_with_context(user_query, context_blocks):
 
     system_prompt = f"""
 You are Spinny AI.
-Answer ONLY using the car data provided below.
-Never invent information.
-Never reference cars that are not included in the context.
+Answer ONLY using the car data provided in the context below.
+Do not invent any car details.
+If the user asks something outside the context, answer using ONLY the provided cars.
 
 CONTEXT:
 {context_str}
@@ -134,6 +135,7 @@ CONTEXT:
 
     response = requests.post(url, json=payload, headers=headers)
     data = response.json()
+
     return data["choices"][0]["message"]["content"]
 
 
@@ -141,21 +143,21 @@ CONTEXT:
 # Streamlit UI
 # ---------------------
 st.title("🚗 Spinny AI — Car Advisor (RAG Powered)")
-st.write("Ask anything about cars in your dataset — I will answer ONLY from your CSV.")
+st.write("Ask anything about the cars in your dataset. Answers come ONLY from your CSV.")
 
-query = st.chat_input("Ask something like: 'Petrol Honda cars under 5 lakh in Delhi'")
+query = st.chat_input("Try: 'Petrol Honda cars under 5 lakh in Delhi'")
 
 if query:
     st.chat_message("user").write(query)
 
-    # Step 1: RAG Search
+    # Step 1: RAG search → retrieve relevant cars
     context_blocks, rows = search_car(query, k=5)
 
-    # Step 2: Answer using LLM with context
-    llm_answer = ask_llm_with_context(query, context_blocks)
+    # Step 2: LLM uses only retrieved data
+    llm_response = ask_llm_with_context(query, context_blocks)
 
-    st.chat_message("assistant").write(llm_answer)
+    st.chat_message("assistant").write(llm_response)
 
-    # Step 3: Show retrieved cars
-    st.subheader("🔎 Cars considered for this answer")
+    # Step 3: Show the retrieved cars used for answer
+    st.subheader("🔎 Cars matched for this answer")
     st.dataframe(pd.DataFrame(rows))
