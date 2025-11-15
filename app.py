@@ -21,9 +21,8 @@ def load_data():
 
 cars = load_data()
 
-
 # ---------------------
-# Convert row -> text block
+# Convert car row -> text block
 # ---------------------
 def row_to_text(row):
     return f"""
@@ -35,29 +34,26 @@ Variant: {row.get('variant')}
 Year: {row.get('make_year')}
 Fuel: {row.get('fuel_type')}
 Transmission: {row.get('transmission_type')}
-Mileage: {row.get('mileage')}
+Mileage: {row.get('mileage')} km
 Ownership: {row.get('ownership')}
-Price: {row.get('procurement_price')}
+Price: ₹{row.get('procurement_price')}
 """
 
 car_texts = [row_to_text(row) for _, row in cars.iterrows()]
 
 
 # ---------------------
-# Simple keyword-based scoring (FREE — no embeddings)
+# FREE KEYWORD SCORING SEARCH
 # ---------------------
 def score_car(car_text, query):
     score = 0
-    words = query.lower().split()
-
-    for w in words:
-        if w in car_text.lower():
+    for word in query.lower().split():
+        if word in car_text.lower():
             score += 1
-
     return score
 
 
-def search_car(query, k=5):
+def search_car(query, k=10):
     scores = [(score_car(text, query), i) for i, text in enumerate(car_texts)]
     scores.sort(reverse=True, key=lambda x: x[0])
 
@@ -70,35 +66,23 @@ def search_car(query, k=5):
 
 
 # ---------------------
-# LLM with RAG context
+# LLM call (z-ai/glm-4.5-air:free)
 # ---------------------
-def ask_llm_with_context(query, context_blocks):
+def call_llm(system_prompt, user_prompt):
     url = "https://openrouter.ai/api/v1/chat/completions"
-
-    context_str = "\n\n".join(context_blocks)
-
-    system_prompt = f"""
-You are Spinny AI.
-Answer ONLY using the cars listed in the context below.
-If the user asks something that cannot be answered using the car list, say:
-"I can only answer using the available cars."
-
-CONTEXT:
-{context_str}
-"""
 
     payload = {
         "model": "z-ai/glm-4.5-air:free",
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": query}
+            {"role": "user", "content": user_prompt}
         ]
     }
 
     headers = {
         "Authorization": f"Bearer {st.secrets['OPENROUTER_API_KEY']}",
         "HTTP-Referer": "http://localhost:8501",
-        "X-Title": "Spinny Car RAG"
+        "X-Title": "Spinny Car Advisor"
     }
 
     response = requests.post(url, json=payload, headers=headers)
@@ -108,27 +92,131 @@ CONTEXT:
 
 
 # ---------------------
+# Initialize conversational criteria
+# ---------------------
+if "criteria" not in st.session_state:
+    st.session_state.criteria = {
+        "budget": None,
+        "city": None,
+        "fuel": None,
+        "transmission": None,
+        "make": None
+    }
+
+if "stage" not in st.session_state:
+    st.session_state.stage = "ask_budget"
+
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+
+# ---------------------
+# Ask next question
+# ---------------------
+def ask_next_question():
+    if st.session_state.stage == "ask_budget":
+        return "What is your budget range?"
+    if st.session_state.stage == "ask_city":
+        return "Which city are you looking to buy the car in?"
+    if st.session_state.stage == "ask_fuel":
+        return "What fuel type do you prefer? (Petrol / Diesel / CNG)"
+    if st.session_state.stage == "ask_transmission":
+        return "What transmission type do you prefer? (Manual / Automatic)"
+    if st.session_state.stage == "ask_make":
+        return "Do you prefer any particular car brand? (Honda, Maruti, Hyundai, etc.)"
+    return None
+
+
+# ---------------------
+# Extract details from user message
+# ---------------------
+def extract_answer(stage, user_input):
+    text = user_input.lower()
+    c = st.session_state.criteria
+
+    if stage == "ask_budget":
+        match = re.findall(r"(\d+)", text)
+        if match:
+            c["budget"] = match[0]  # store numeric value
+            st.session_state.stage = "ask_city"
+            return True
+
+    if stage == "ask_city":
+        c["city"] = text
+        st.session_state.stage = "ask_fuel"
+        return True
+
+    if stage == "ask_fuel":
+        if "petrol" in text:
+            c["fuel"] = "petrol"
+        elif "diesel" in text:
+            c["fuel"] = "diesel"
+        elif "cng" in text:
+            c["fuel"] = "cng"
+        st.session_state.stage = "ask_transmission"
+        return True
+
+    if stage == "ask_transmission":
+        if "auto" in text:
+            c["transmission"] = "automatic"
+        else:
+            c["transmission"] = "manual"
+        st.session_state.stage = "ask_make"
+        return True
+
+    if stage == "ask_make":
+        c["make"] = text
+        st.session_state.stage = "search"
+        return True
+
+    return False
+
+
+# ---------------------
 # Streamlit UI
 # ---------------------
-st.title("🚗 Spinny AI — Car Advisor (RAG, No Embeddings, 100% Free)")
-st.write("Ask questions — AI will answer ONLY using your CSV data.")
+st.title("🚗 Spinny AI — Personal Car Consultant")
 
-query = st.chat_input("Try: 'Honda petrol cars under 5 lakh in Delhi'")
+# Display chat
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-if query:
-    st.chat_message("user").write(query)
+# Chat input
+user_input = st.chat_input("Your answer...")
 
-    # Search cars
-    context_blocks, rows = search_car(query, k=5)
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
-    if len(context_blocks) == 0:
-        st.chat_message("assistant").write(
-            "No relevant cars found in the dataset. Try different keywords."
-        )
+    # Process answer
+    extract_answer(st.session_state.stage, user_input)
+
+    # Next stage?
+    if st.session_state.stage != "search":
+        question = ask_next_question()
+        st.session_state.messages.append({"role": "assistant", "content": question})
+        st.chat_message("assistant").write(question)
+
     else:
-        # LLM answer using the matched cars
-        llm_response = ask_llm_with_context(query, context_blocks)
-        st.chat_message("assistant").write(llm_response)
+        # Build final search query
+        c = st.session_state.criteria
+        search_query = f"{c['budget']} budget {c['city']} {c['fuel']} {c['transmission']} {c['make']}"
 
-        st.subheader("🔎 Cars used to answer your question")
+        # Search cars
+        context_blocks, rows = search_car(search_query, k=10)
+
+        if len(rows) == 0:
+            answer = "No matching cars found in your budget. Try changing your preferences."
+        else:
+            # LLM contextual answer
+            context = "\n\n".join(context_blocks)
+            answer = call_llm(
+                system_prompt=f"You are a car advisor. Use ONLY this data:\n{context}",
+                user_prompt="Recommend the best car from the above list."
+            )
+
+        st.session_state.messages.append({"role": "assistant", "content": answer})
+        st.chat_message("assistant").write(answer)
+
+        # Show matched cars
+        st.subheader("🔎 Cars matched to your needs")
         st.dataframe(pd.DataFrame(rows))
