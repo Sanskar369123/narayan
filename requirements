@@ -1,4 +1,4 @@
 streamlit
 pandas
-requests
-faiss-cpu
+openai
+python-dotenv
