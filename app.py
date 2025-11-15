@@ -8,7 +8,8 @@ import os
 st.set_page_config(page_title="Spinny AI Car Advisor", page_icon="🚗")
 
 # load OpenAI client using environment var
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+import openai
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @st.cache_data
 def load_cars():
