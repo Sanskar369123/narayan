@@ -1,177 +1,108 @@
-import streamlit as st
-import pandas as pd
-import json
-from openai import OpenAI
 import os
+import streamlit as st
+from openai import OpenAI
 
-# --------------------- SETUP ---------------------
-st.set_page_config(page_title="Spinny AI Car Advisor", page_icon="🚗")
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="AI Car Buying Consultant", page_icon="🚗")
 
-# load OpenAI client using environment var
-import openai
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Load API key
+API_KEY = st.secrets.get("OPENAI_API_KEY", None) or os.getenv("OPENAI_API_KEY")
+if not API_KEY:
+    st.error("❌ OPENAI_API_KEY not set. Please set it as env var or in Streamlit secrets.")
+    st.stop()
 
-@st.cache_data
-def load_cars():
-    return pd.read_csv("cars.csv")
+client = OpenAI(api_key=API_KEY)
 
-cars_df = load_cars()
-
-# --------------------- SESSION STATE ---------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "preferences" not in st.session_state:
-    st.session_state.preferences = {}
-if "stage" not in st.session_state:
-    st.session_state.stage = "collecting"
-
-# --------------------- PROMPT ---------------------
 SYSTEM_PROMPT = """
-You are Spinny's AI Car Consultant.
+You are an expert Indian car buying consultant.
 
 Your job:
-1. Ask friendly questions to understand user's ideal car.
-2. Extract structured fields from user messages:
-   - budget_min (int)
-   - budget_max (int)
-   - city (string)
-   - fuel_type (Petrol/Diesel/CNG/Electric/Any)
-   - body_type (Hatchback/Sedan/SUV/MPV/Any)
-   - seats_min (int)
-3. Output a conversational reply.
-4. At the END, output ONLY a JSON object as last line (no explanation).
+- Deeply understand the user's needs and constraints.
+- Ask smart, minimal questions to clarify:
+  budget (₹), city, family size, daily running (km/day), highway vs city, fuel preference, body style preference, brand preference, must-have features.
+- Then recommend 2–5 specific car models available in India (including older model years if relevant).
 
-If no new info found, output {} as JSON.
+When recommending:
+- Group cars by segment (e.g. "premium hatchback", "compact SUV", "sedan").
+- For each recommended car, clearly list:
+  - Pros (mileage, comfort, safety, performance, space, features, resale, maintenance)
+  - Cons / trade-offs
+- Always explain WHY a particular car suits the user's profile.
+
+Comparison behavior:
+- If user mentions 2–3 cars, compare them clearly:
+  - Which is better for city/highway
+  - Which has better mileage
+  - Which has better safety/build
+  - Which is more comfortable
+  - Which has lower long-term cost
+- End with a clear recommendation: which one you would pick for this user and why.
+
+Tone:
+- Friendly, consultative, like a knowledgeable salesperson who is honest.
+- Avoid overloading with specs; connect features to their real-life impact.
+
+Important:
+- Assume the user is in India unless they specify otherwise.
+- If information about a very new car is uncertain, say so and reason based on segment + brand trends.
 """
 
-# --------------------- LLM CALL ---------------------
-def call_llm(conversation):
+# ---------------- SESSION STATE ----------------
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": "Hi! 👋 I’m your AI car buying consultant. Tell me a bit about your budget, where you drive, and who’ll use the car — and I’ll help you shortlist and compare options.",
+        }
+    ]
+
+# ---------------- UI HEADER ----------------
+st.title("🚗 AI Car Buying Consultant")
+st.caption("Ask anything about which car to buy, comparisons, pros/cons, and I’ll guide you like a personal consultant.")
+
+# ---------------- SHOW CHAT HISTORY ----------------
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# Optional: reset button
+if st.button("🔁 Reset conversation"):
+    st.session_state.messages = [
+        {
+            "role": "assistant",
+            "content": "Conversation reset. 😊 Tell me again: what kind of car are you considering (budget, usage, city, family size, etc.)?",
+        }
+    ]
+    st.experimental_rerun()
+
+# ---------------- HANDLE USER INPUT ----------------
+user_input = st.chat_input("Describe your situation or ask about specific cars...")
+
+def call_llm(chat_messages):
+    """Call the OpenAI chat completion API with full conversation."""
     response = client.chat.completions.create(
-        model="meituan/longcat-flash-chat:free",
-        messages=[{"role": "system", "content": SYSTEM_PROMPT}] + conversation,
-        temperature=0.4,
+        model="qwen/qwen3-235b-a22b:free",
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            *chat_messages,
+        ],
+        temperature=0.5,
     )
     return response.choices[0].message.content
 
+if user_input:
+    # 1. Add user message to state
+    st.session_state.messages.append({"role": "user", "content": user_input})
 
-def parse_json_from_message(content: str):
-    lines = content.splitlines()
-    last = lines[-1].strip()
+    # 2. Show user message immediately
+    with st.chat_message("user"):
+        st.markdown(user_input)
 
-    try:
-        prefs = json.loads(last)
-        chat_text = "\n".join(lines[:-1]).strip()
-        return chat_text, prefs
-    except:
-        # no json found
-        return content, {}
-
-
-def merge_prefs(current, new):
-    for k, v in new.items():
-        if v not in ["", None]:
-            current[k] = v
-    return current
-
-
-def enough_prefs(prefs):
-    return "budget_max" in prefs and "city" in prefs
-
-
-# --------------------- FILTER LOGIC ---------------------
-def filter_cars(prefs, df):
-    filtered = df.copy()
-
-    if "budget_min" in prefs:
-        filtered = filtered[filtered["price"] >= int(prefs["budget_min"])]
-
-    if "budget_max" in prefs:
-        filtered = filtered[filtered["price"] <= int(prefs["budget_max"])]
-
-    if "city" in prefs:
-        filtered = filtered[filtered["city"].str.contains(prefs["city"], case=False, na=False)]
-
-    if "fuel_type" in prefs and prefs["fuel_type"].lower() != "any":
-        filtered = filtered[filtered["fuel_type"].str.contains(prefs["fuel_type"], case=False)]
-
-    if "body_type" in prefs and prefs["body_type"].lower() != "any":
-        filtered = filtered[filtered["body_type"].str.contains(prefs["body_type"], case=False)]
-
-    if "seats_min" in prefs:
-        filtered = filtered[filtered["seats"] >= int(prefs["seats_min"])]
-
-    return filtered
-
-
-def pretty_car(row):
-    return (
-        f"**{row['make']} {row['model']} {row['year']}**\n"
-        f"- Price: ₹{int(row['price']):,}\n"
-        f"- Fuel: {row['fuel_type']} | Body: {row['body_type']}\n"
-        f"- Seats: {row['seats']} | Km Driven: {row['km_driven']:,}\n"
-        f"- City: {row['city']} | Hub: {row['hub_name']}"
-    )
-
-
-# --------------------- UI ---------------------
-st.title("🚗 Spinny AI Car Advisor (Chat-Only MVP)")
-
-# Display past chat
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
-
-# Chat input
-if prompt := st.chat_input("Tell me what kind of car you want..."):
-
-    st.session_state.messages.append({"role": "user", "content": prompt})
-
-    # ---- If we are still collecting preferences ----
-    if st.session_state.stage == "collecting":
-
-        llm_output = call_llm(st.session_state.messages)
-        visible, new_prefs = parse_json_from_message(llm_output)
-
-        st.session_state.preferences = merge_prefs(st.session_state.preferences, new_prefs)
-
-        # Show assistant message
-        with st.chat_message("assistant"):
-            st.markdown(visible)
-        st.session_state.messages.append({"role": "assistant", "content": visible})
-
-        # If enough prefs → Recommend cars
-        if enough_prefs(st.session_state.preferences):
-            st.session_state.stage = "recommended"
-
-            matches = filter_cars(st.session_state.preferences, cars_df)
-
-            with st.chat_message("assistant"):
-                if len(matches) == 0:
-                    st.markdown("I didn't find matches in your city — but I found options in other hubs:")
-
-                    relaxed = dict(st.session_state.preferences)
-                    relaxed.pop("city", None)
-                    alt = filter_cars(relaxed, cars_df).head(5)
-
-                    if len(alt) == 0:
-                        st.markdown("Still nothing. Try increasing budget or changing body type.")
-                    else:
-                        for _, row in alt.iterrows():
-                            st.markdown(pretty_car(row))
-                else:
-                    st.markdown("Here are the best matches for you:")
-                    for _, row in matches.head(5).iterrows():
-                        st.markdown(pretty_car(row))
-
-    # ---- Already recommended, now just follow-up chat ----
-    else:
-        followup_prompt = [
-            {"role": "system", "content": "You already recommended cars. Continue conversation helpfully."}
-        ] + st.session_state.messages
-
-        reply = call_llm(followup_prompt)
-
-        with st.chat_message("assistant"):
+    # 3. Call LLM with full history
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking about the best cars for you..."):
+            reply = call_llm(st.session_state.messages)
             st.markdown(reply)
 
-        st.session_state.messages.append({"role": "assistant", "content": reply})
+    # 4. Save assistant reply
+    st.session_state.messages.append({"role": "assistant", "content": reply})
