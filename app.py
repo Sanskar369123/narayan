@@ -51,7 +51,7 @@ def call_openrouter(messages):
     }
 
     data = {
-        "model": "qwen/qwen3-235b-a22b:free",
+        "model": "tngtech/deepseek-r1t2-chimera:free",
         "messages": messages,
         "temperature": 0.5
     }
