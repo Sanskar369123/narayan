@@ -5,13 +5,17 @@ from openai import OpenAI
 # ---------------- CONFIG ----------------
 st.set_page_config(page_title="AI Car Buying Consultant", page_icon="🚗")
 
-# Load API key
-API_KEY = st.secrets.get("OPENAI_API_KEY", None) or os.getenv("OPENAI_API_KEY")
+# Load OpenRouter API key
+API_KEY = st.secrets.get("OPENROUTER_API_KEY", None) or os.getenv("OPENROUTER_API_KEY")
 if not API_KEY:
-    st.error("❌ OPENAI_API_KEY not set. Please set it as env var or in Streamlit secrets.")
+    st.error("❌ OPENROUTER_API_KEY not set. Add it to Streamlit secrets or env vars.")
     st.stop()
 
-client = OpenAI(api_key=API_KEY)
+# Create OpenRouter client
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=API_KEY
+)
 
 SYSTEM_PROMPT = """
 You are an expert Indian car buying consultant.
@@ -19,7 +23,8 @@ You are an expert Indian car buying consultant.
 Your job:
 - Deeply understand the user's needs and constraints.
 - Ask smart, minimal questions to clarify:
-  budget (₹), city, family size, daily running (km/day), highway vs city, fuel preference, body style preference, brand preference, must-have features.
+  budget (₹), city, family size, daily running (km/day), highway vs city, fuel preference,
+  body style preference, brand preference, must-have features.
 - Then recommend 2–5 specific car models available in India (including older model years if relevant).
 
 When recommending:
@@ -36,15 +41,11 @@ Comparison behavior:
   - Which has better safety/build
   - Which is more comfortable
   - Which has lower long-term cost
-- End with a clear recommendation: which one you would pick for this user and why.
+- End with a clear recommendation.
 
 Tone:
-- Friendly, consultative, like a knowledgeable salesperson who is honest.
-- Avoid overloading with specs; connect features to their real-life impact.
-
-Important:
-- Assume the user is in India unless they specify otherwise.
-- If information about a very new car is uncertain, say so and reason based on segment + brand trends.
+- Friendly, helpful, consultative.
+- Explain reasoning in simple, human language.
 """
 
 # ---------------- SESSION STATE ----------------
@@ -52,34 +53,31 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": "Hi! 👋 I’m your AI car buying consultant. Tell me a bit about your budget, where you drive, and who’ll use the car — and I’ll help you shortlist and compare options.",
+            "content": "Hi! 👋 I’m your AI car consultant. Tell me your budget, city, family size, and driving usage — I’ll help you pick the perfect car.",
         }
     ]
 
 # ---------------- UI HEADER ----------------
 st.title("🚗 AI Car Buying Consultant")
-st.caption("Ask anything about which car to buy, comparisons, pros/cons, and I’ll guide you like a personal consultant.")
+st.caption("Ask anything about car decisions & comparisons — I'll help like a personal expert.")
 
 # ---------------- SHOW CHAT HISTORY ----------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Optional: reset button
+# ---------------- RESET BUTTON ----------------
 if st.button("🔁 Reset conversation"):
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": "Conversation reset. 😊 Tell me again: what kind of car are you considering (budget, usage, city, family size, etc.)?",
+            "content": "Conversation reset 😊 Tell me your budget, city, and usage again.",
         }
     ]
     st.experimental_rerun()
 
-# ---------------- HANDLE USER INPUT ----------------
-user_input = st.chat_input("Describe your situation or ask about specific cars...")
-
+# ---------------- LLM CALL FUNCTION ----------------
 def call_llm(chat_messages):
-    """Call the OpenAI chat completion API with full conversation."""
     response = client.chat.completions.create(
         model="qwen/qwen3-235b-a22b:free",
         messages=[
@@ -87,22 +85,29 @@ def call_llm(chat_messages):
             *chat_messages,
         ],
         temperature=0.5,
+        extra_headers={
+            "HTTP-Referer": "https://your-app-url",
+            "X-Title": "Spinny AI Car Consultant"
+        }
     )
     return response.choices[0].message.content
 
+# ---------------- HANDLE USER INPUT ----------------
+user_input = st.chat_input("Ask me about any car or your needs...")
+
 if user_input:
-    # 1. Add user message to state
+    # Add user message
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # 2. Show user message immediately
+    # Display it
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # 3. Call LLM with full history
+    # AI response
     with st.chat_message("assistant"):
-        with st.spinner("Thinking about the best cars for you..."):
+        with st.spinner("Analyzing your requirements..."):
             reply = call_llm(st.session_state.messages)
             st.markdown(reply)
 
-    # 4. Save assistant reply
+    # Save AI response
     st.session_state.messages.append({"role": "assistant", "content": reply})
