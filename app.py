@@ -13,68 +13,60 @@ if not API_KEY:
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+
 # ---------------- SESSION STATE ----------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
 if "prefs" not in st.session_state:
     st.session_state.prefs = {}
+
 if "stage" not in st.session_state:
-    st.session_state.stage = "greeting"  # the conversation stage
+    st.session_state.stage = "greeting"
+
 
 # ---------------- SYSTEM PROMPT ----------------
 SYSTEM_PROMPT = """
 You are an AI Car Buying Consultant who asks ONE QUESTION AT A TIME.
 
-RULES:
-1. NEVER list multiple questions together.
-2. ALWAYS ask only the NEXT required question.
-3. Progress through these stages in order:
+Stages:
+greeting → ask_budget → ask_city → ask_usage → ask_fuel → ask_transmission → ask_priorities → ready_to_recommend
 
-   greeting → ask_budget → ask_city → ask_usage → ask_fuel → ask_transmission → ask_priorities → ready_to_recommend
+Rules:
+- Ask ONLY ONE question at a time.
+- Never list multiple questions.
+- Move to the next stage only after the user responds.
+- In ready_to_recommend, suggest 2–4 cars with pros/cons and reasoning.
+- Stay friendly and short.
 
-4. Once in 'ready_to_recommend', give 2–4 car suggestions with:
-   - segment
-   - pros
-   - cons
-   - why it fits the user's needs
-5. Continue the conversation naturally after recommending.
-
-IMPORTANT:
-- If user answers, move to next stage.
-- If user deviates, gently pull them back.
-- Keep responses short, friendly, and conversational.
 """
 
 
-# ---------------- HELPER FUNCTION ----------------
+# ---------------- LLM CALL ----------------
 def call_openrouter(messages):
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {API_KEY}",
-        "HTTP-Referer": "https://your-app",
-        "X-Title": "Car Advisor",
     }
 
     data = {
         "model": "tngtech/deepseek-r1t2-chimera:free",
         "messages": messages,
-        "temperature": 0.3,
+        "temperature": 0.25,
     }
 
     response = requests.post(OPENROUTER_URL, headers=headers, data=json.dumps(data))
 
     if response.status_code != 200:
-        return f"Error: {response.text}"
+        return f"⚠️ OpenRouter Error: {response.text}"
 
     result = response.json()
     return result["choices"][0]["message"]["content"]
 
 
 # ---------------- NEXT QUESTION LOGIC ----------------
-def get_next_prompt():
-
+def next_question():
     stage = st.session_state.stage
-    prefs = st.session_state.prefs
 
     if stage == "greeting":
         st.session_state.stage = "ask_budget"
@@ -86,15 +78,15 @@ def get_next_prompt():
 
     if stage == "ask_city":
         st.session_state.stage = "ask_usage"
-        return "Nice! How do you mostly drive? City, highway, or mixed?"
+        return "Nice! How do you mostly drive — city, highway, or mixed?"
 
     if stage == "ask_usage":
         st.session_state.stage = "ask_fuel"
-        return "Got it. Do you prefer Petrol, Diesel, CNG, or Electric?"
+        return "Got it! Do you prefer Petrol, Diesel, CNG, or Electric?"
 
     if stage == "ask_fuel":
         st.session_state.stage = "ask_transmission"
-        return "Understood. Do you want Automatic or Manual transmission?"
+        return "Understood. Do you prefer Automatic or Manual?"
 
     if stage == "ask_transmission":
         st.session_state.stage = "ask_priorities"
@@ -102,46 +94,49 @@ def get_next_prompt():
 
     if stage == "ask_priorities":
         st.session_state.stage = "ready_to_recommend"
-        return "Perfect! Give me a moment while I shortlist the best options for you. 🚗💡"
-
-    if stage == "ready_to_recommend":
-        return None  # LLM will handle this stage
+        return None  # LLM will handle recommendation
 
     return None
 
 
 # ---------------- UI ----------------
-st.title("🚗 AI Car Buying Consultant")
+st.markdown("<h1 style='text-align:center;'>🚗 AI Car Buying Consultant</h1>", unsafe_allow_html=True)
+st.write("Chat naturally — I’ll guide you one step at a time.")
 
-# Show chat history
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+# Render chat history FIRST
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
-user_input = st.chat_input("Your message...")
+# Input box
+user_input = st.chat_input("Type your message...")
 
 if user_input:
-
-    # Add user message
+    # 1️⃣ Add USER message immediately
     st.session_state.messages.append({"role": "user", "content": user_input})
 
-    # Save user preferences (very raw)
+    # Display it instantly
+    with st.chat_message("user"):
+        st.write(user_input)
+
+    # Save the preference to dict
     st.session_state.prefs[st.session_state.stage] = user_input
 
-    # Determine next question
-    next_q = get_next_prompt()
+    # 2️⃣ Determine NEXT question
+    question = next_question()
 
-    # If next_q None → use LLM to recommend
-    if next_q is None:
+    # 3️⃣ If we still have questions → show next question (NO LLM)
+    if question:
+        st.session_state.messages.append({"role": "assistant", "content": question})
+        with st.chat_message("assistant"):
+            st.write(question)
+
+    # 4️⃣ If stage = ready_to_recommend → CALL THE MODEL
+    else:
         with st.chat_message("assistant"):
             with st.spinner("Finding the best cars for you..."):
                 messages = [{"role": "system", "content": SYSTEM_PROMPT}] + st.session_state.messages
                 reply = call_openrouter(messages)
+                st.write(reply)
 
-                st.markdown(reply)
-                st.session_state.messages.append({"role": "assistant", "content": reply})
-
-    else:
-        with st.chat_message("assistant"):
-            st.markdown(next_q)
-            st.session_state.messages.append({"role": "assistant", "content": next_q})
+        st.session_state.messages.append({"role": "assistant", "content": reply})
