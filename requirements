@@ -2,3 +2,4 @@ streamlit
 pandas
 openai
 python-dotenv
+pydantic==1.10.12
