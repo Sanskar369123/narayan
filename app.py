@@ -21,90 +21,75 @@ SPINNY_RED = "#E11B22"
 LIGHT_GREY = "#F7F7F7"
 
 # ---------------- CSS ----------------
-st.markdown(
-    """
-    <style>
-        /* FORCE LIGHT THEME */
-        :root, body, .main, .block-container {
-            background-color: #F7F7F7 !important;
-            color: #111 !important;
-        }
+st.markdown("""
+<style>
 
-        /* Sidebar */
-        section[data-testid="stSidebar"] {
-            background-color: #FFFFFF !important;
-        }
+    /* GLOBAL LAYOUT CLEANUP */
+    .block-container {
+        max-width: 680px !important;
+        margin: auto;
+        padding-top: 2rem;
+    }
 
-        /* Chat message container override */
-        div[data-testid="chat-message"] {
-            color: #111 !important;
-        }
+    body, .main, .block-container {
+        background-color: #F5F6F7 !important;
+    }
 
-        /* Chat bubbles */
-        .chat-bubble {
-            padding: 0.8rem 1rem;
-            border-radius: 14px;
-            margin-bottom: 0.6rem;
-            max-width: 90%;
-            line-height: 1.45;
-            font-size: 1rem;
-            color: #111 !important;
-        }
+    /* SIDEBAR */
+    section[data-testid="stSidebar"] {
+        background-color: #FFFFFF !important;
+        border-right: 1px solid #EEE !important;
+    }
 
-        .assistant-bubble {
-            background-color: #FFFFFF !important;
-            border: 1px solid #E0E0E0 !important;
-        }
+    /* ASSISTANT BUBBLE */
+    .assistant-bubble {
+        background-color: #FFFFFF !important;
+        border: 1px solid #E5E7EB !important;
+        color: #111 !important;
+        padding: 12px 16px;
+        border-radius: 14px;
+        margin-bottom: 10px;
+        width: fit-content;
+        max-width: 80%;
+        box-shadow: 0px 1px 3px rgba(0,0,0,0.06);
+    }
 
-        .user-bubble {
-            background-color: #E11B22 !important;
-            color: white !important;
-            margin-left: auto;
-        }
+    /* USER BUBBLE */
+    .user-bubble {
+        background-color: #E11B22 !important;
+        color: white !important;
+        padding: 12px 16px;
+        border-radius: 14px;
+        margin-bottom: 10px;
+        width: fit-content;
+        max-width: 80%;
+        margin-left: auto;
+        box-shadow: 0px 1px 3px rgba(0,0,0,0.10);
+    }
 
-        /* Input box */
-        textarea[aria-label="Your answer..."] {
-            background-color: white !important;
-            color: #111 !important;
-        }
+    /* CHAT INPUT BAR */
+    div[data-testid="stChatInputContainer"] {
+        background-color: #FFFFFF !important;
+        padding: 10px 20px;
+        border-top: 1px solid #EEE;
+    }
 
-        /* Chat input container */
-        div[data-testid="stChatInputContainer"] textarea {
-            background-color: #FFFFFF !important;
-            color: #000000 !important;
-            border-radius: 12px;
-        }
+    div[data-testid="stChatInputContainer"] textarea {
+        background-color: #FFFFFF !important;
+        color: #111 !important;
+        border-radius: 16px !important;
+        padding: 12px !important;
+        border: 1px solid #DDD !important;
+    }
 
-        /* Comparison cards */
-        .compare-card {
-            background: white !important;
-            border-radius: 14px;
-            border: 1px solid #DDD !important;
-            padding: 14px;
-            color: #111 !important;
-        }
+    /* CLEAN UP DEFAULT STREAMLIT CROWDED SPACING */
+    .css-1cpxqw2, .css-12oz5g7 { 
+        padding-top: 0 !important;
+    }
 
-        .compare-title {
-            font-weight: 700;
-            font-size: 1.1rem;
-            margin-bottom: 6px;
-            color: #111 !important;
-        }
+</style>
+""", unsafe_allow_html=True)
 
-        /* Buttons for alternatives */
-        .alt-btn {
-            background: #FFECEC;
-            border: 1px solid #F8CACA;
-            padding: 6px 10px;
-            border-radius: 8px;
-            cursor: pointer;
-            margin-right: 5px;
-        }
-
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
 # ---------------- SESSION ----------------
 if "mode" not in st.session_state: st.session_state.mode = None
@@ -235,7 +220,7 @@ for msg in st.session_state.messages:
     bubble = "assistant-bubble" if msg["role"] == "assistant" else "user-bubble"
     with st.chat_message(msg["role"]):
         st.markdown(
-            f"<div class='chat-bubble {bubble}'>{msg['content']}</div>",
+            f"<div class='{bubble}'>{msg['content']}</div>",
             unsafe_allow_html=True,
         )
 
