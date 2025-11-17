@@ -28,69 +28,70 @@ OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 # CLEAN MINIMAL UI CSS
 # ------------------------------------------------------------
 st.markdown(
-"""
-<style>
-    .block-container {
-        max-width: 720px !important;
-        margin: auto;
-        padding-top: 2rem;
-    }
-    body, .main, .block-container {
-        background-color: #F5F6F7 !important;
-    }
-    section[data-testid="stSidebar"] {
-        background-color: #FFFFFF !important;
-        border-right: 1px solid #EEE !important;
-    }
-    .assistant-bubble {
-        background-color: #FFFFFF;
-        border: 1px solid #E5E7EB;
-        color: #111;
-        padding: 12px 16px;
-        border-radius: 14px;
-        max-width: 80%;
-        margin-bottom: 8px;
-        box-shadow: 0px 1px 3px rgba(0,0,0,0.08);
-    }
-    .user-bubble {
-        background-color: #E11B22;
-        color: #FFF;
-        padding: 12px 16px;
-        border-radius: 14px;
-        max-width: 80%;
-        margin-left: auto;
-        margin-bottom: 8px;
-        box-shadow: 0px 1px 3px rgba(0,0,0,0.10);
-    }
-    div[data-testid="stChatInputContainer"] {
-        background-color: #FFFFFF;
-        border-top: 1px solid #EEE;
-    }
-    div[data-testid="stChatInputContainer"] textarea {
-        border: 1px solid #DDD !important;
-        border-radius: 14px !important;
-        background-color: #FFFFFF !important;
-        color: #111 !important;
-    }
-    .car-card {
-        background-color: #FFFFFF;
-        border: 1px solid #E5E7EB;
-        border-radius: 16px;
-        padding: 14px;
-        margin-bottom: 12px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
+    """
+    <style>
+        .block-container {
+            max-width: 720px !important;
+            margin: auto;
+            padding-top: 2rem;
+        }
+        body, .main, .block-container {
+            background-color: #F5F6F7 !important;
+        }
+        section[data-testid="stSidebar"] {
+            background-color: #FFFFFF !important;
+            border-right: 1px solid #EEE !important;
+        }
+        .assistant-bubble {
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            color: #111;
+            padding: 12px 16px;
+            border-radius: 14px;
+            max-width: 80%;
+            margin-bottom: 8px;
+            box-shadow: 0px 1px 3px rgba(0,0,0,0.08);
+        }
+        .user-bubble {
+            background-color: #E11B22;
+            color: #FFF;
+            padding: 12px 16px;
+            border-radius: 14px;
+            max-width: 80%;
+            margin-left: auto;
+            margin-bottom: 8px;
+            box-shadow: 0px 1px 3px rgba(0,0,0,0.10);
+        }
+        div[data-testid="stChatInputContainer"] {
+            background-color: #FFFFFF;
+            border-top: 1px solid #EEE;
+        }
+        div[data-testid="stChatInputContainer"] textarea {
+            border: 1px solid #DDD !important;
+            border-radius: 14px !important;
+            background-color: #FFFFFF !important;
+            color: #111 !important;
+        }
+        .car-card {
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 16px;
+            padding: 14px;
+            margin-bottom: 12px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ------------------------------------------------------------
 # SESSION STATE
 # ------------------------------------------------------------
 if "mode" not in st.session_state:
-    st.session_state.mode = None
+    st.session_state.mode = None            # "choose" | "compare" | "tips"
 
 if "stage" not in st.session_state:
-    st.session_state.stage = "init"
+    st.session_state.stage = "init"         # init, q1..q11, reco, show_reco, etc.
 
 if "prefs" not in st.session_state:
     st.session_state.prefs = {}
@@ -104,6 +105,9 @@ if "reco_json" not in st.session_state:
 if "raw_reco" not in st.session_state:
     st.session_state.raw_reco = ""
 
+if "generated_tips" not in st.session_state:
+    st.session_state.generated_tips = None
+
 
 # ------------------------------------------------------------
 # PROMPTS
@@ -112,7 +116,8 @@ CONSULTANT_PROMPT = """
 You are an Indian car consultant. Based on conversation history, return:
 {
  "cars":[
-   {"name":"","segment":"","summary":"","pros":[],"cons":[],"price_band":"","ideal_for":""}
+   {"name":"","segment":"","summary":"",
+    "pros":[],"cons":[],"price_band":"","ideal_for":""}
  ],
  "cheaper_alternatives":[],
  "premium_alternatives":[],
@@ -134,7 +139,8 @@ Given two cars to compare, return only JSON:
 """
 
 TIPS_PROMPT = """
-Based on the conversation, give 6–8 simple bullet tips.
+Based on the conversation, give 6–8 simple bullet tips
+about how to choose a car, test drive, and avoid mistakes.
 Return plain text bullets (no JSON).
 """
 
@@ -146,35 +152,36 @@ def call_llm(messages):
     payload = {
         "model": "tngtech/deepseek-r1t2-chimera:free",
         "messages": messages,
-        "temperature": 0.25
+        "temperature": 0.25,
     }
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-
     try:
         r = requests.post(OPENROUTER_URL, headers=headers, data=json.dumps(payload))
         return r.json()["choices"][0]["message"]["content"]
-    except:
+    except Exception:
         return None
 
 
 def extract_json(text):
-    if not text: 
+    if not text:
         return None
+    # try direct
     try:
         return json.loads(text)
-    except:
+    except Exception:
         pass
+    # fallback: extract {...}
     try:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             return json.loads(match.group(0))
-    except:
+    except Exception:
         pass
     return None
 
 
 # ------------------------------------------------------------
-# MODE SELECTION
+# MODE SELECTION SCREEN
 # ------------------------------------------------------------
 if st.session_state.stage == "init":
     st.markdown("## 🚗 Spinny AI Car Consultant")
@@ -183,7 +190,7 @@ if st.session_state.stage == "init":
     mode = st.radio(
         "Choose:",
         ["Guide me to choose a car", "Compare models", "Car buying tips"],
-        label_visibility="collapsed"
+        label_visibility="collapsed",
     )
 
     if st.button("Continue ➡️"):
@@ -209,20 +216,20 @@ with st.sidebar:
         for k, v in st.session_state.prefs.items():
             st.write(f"**{k.upper()}**: {v}")
     else:
-        st.caption("As you answer, details appear here.")
+        st.caption("As you answer, details will appear here.")
     if st.button("Reset"):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
         st.rerun()
 
 
 # ------------------------------------------------------------
 # RENDER CHAT HISTORY
 # ------------------------------------------------------------
-for m in st.session_state.messages:
-    bubble = "assistant-bubble" if m["role"] == "assistant" else "user-bubble"
-    with st.chat_message(m["role"]):
-        st.markdown(f"<div class='{bubble}'>{m['content']}</div>", unsafe_allow_html=True)
+for msg in st.session_state.messages:
+    bubble = "assistant-bubble" if msg["role"] == "assistant" else "user-bubble"
+    with st.chat_message(msg["role"]):
+        st.markdown(f"<div class='{bubble}'>{msg['content']}</div>", unsafe_allow_html=True)
 
 
 # ============================================================
@@ -235,16 +242,16 @@ if st.session_state.mode == "choose":
         "q2": "Who will drive the car mostly?",
         "q3": "What is your budget? (e.g. ₹6–8 lakh)",
         "q4": "Which city do you live in?",
-        "q5": "How many people travel usually?",
-        "q6": "How many km/day do you drive?",
-        "q7": "City, highway, or mixed usage?",
-        "q8": "Roads: smooth or rough?",
-        "q9": "Fuel preference (Petrol/Diesel/CNG/Electric)?",
-        "q10": "Transmission (Manual/Automatic)?",
-        "q11": "Top priority: mileage, safety, comfort, features, maintenance?",
+        "q5": "How many people usually travel in the car?",
+        "q6": "How many km/day do you typically drive?",
+        "q7": "Is your usage mostly city, highway, or mixed?",
+        "q8": "How are the roads: smooth, broken, speed breakers?",
+        "q9": "Any fuel preference (Petrol/Diesel/CNG/Electric)?",
+        "q10": "Do you prefer manual or automatic transmission?",
+        "q11": "Top priority: mileage, safety, comfort, features, low maintenance?",
     }
 
-    # Ask questions one by one
+    # --- Question asking phase ---
     if st.session_state.stage in QUESTIONS:
         q = QUESTIONS[st.session_state.stage]
         with st.chat_message("assistant"):
@@ -254,14 +261,15 @@ if st.session_state.mode == "choose":
         if ans:
             st.session_state.messages.append({"role": "user", "content": ans})
             st.session_state.prefs[st.session_state.stage] = ans
-            i = int(st.session_state.stage[1:])
-            st.session_state.stage = "reco" if i == 11 else f"q{i+1}"
+
+            idx = int(st.session_state.stage[1:])
+            st.session_state.stage = "reco" if idx == 11 else f"q{idx+1}"
             st.rerun()
 
-    # Generate recommendation JSON
+    # --- Recommendation phase ---
     elif st.session_state.stage == "reco":
         with st.chat_message("assistant"):
-            with st.spinner("Finding best matches..."):
+            with st.spinner("Finding the best options for you..."):
                 msgs = [{"role": "system", "content": CONSULTANT_PROMPT}] + st.session_state.messages
                 raw = call_llm(msgs)
 
@@ -270,7 +278,7 @@ if st.session_state.mode == "choose":
         st.session_state.stage = "show_reco"
         st.rerun()
 
-    # Show recommendations
+    # --- Show recommendations + alternatives + follow-up ---
     elif st.session_state.stage == "show_reco":
         data = st.session_state.reco_json
 
@@ -280,21 +288,19 @@ if st.session_state.mode == "choose":
             premium = data.get("premium_alternatives", [])
             follow_q = data.get("followup_question", "")
 
+            # Show car cards
             for car in cars:
                 with st.chat_message("assistant"):
                     st.markdown(
                         f"""
                         <div class='car-card'>
-                            <h4>{car.get('name','')}</h4>
+                            <h4>{car.get('name', '')}</h4>
                             <p style='font-size:0.9rem;color:#555;'>{car.get('segment','')}</p>
                             <p>{car.get('summary','')}</p>
-
                             <b>Pros:</b>
                             <ul>{''.join([f"<li>{p}</li>" for p in car.get('pros',[])])}</ul>
-
                             <b>Cons:</b>
                             <ul>{''.join([f"<li>{c}</li>" for c in car.get('cons',[])])}</ul>
-
                             <b>Best for:</b> {car.get('ideal_for','')}
                         </div>
                         """,
@@ -311,7 +317,6 @@ if st.session_state.mode == "choose":
                         )
                         st.session_state.stage = "reco"
                         st.rerun()
-
                 if premium:
                     if c2.button("🔼 Premium Options"):
                         st.session_state.messages.append(
@@ -320,37 +325,43 @@ if st.session_state.mode == "choose":
                         st.session_state.stage = "reco"
                         st.rerun()
 
-            # Follow-up question
+            # Follow-up question from model
             if follow_q:
                 with st.chat_message("assistant"):
                     st.markdown(
-                        f"<div class='assistant-bubble'>{follow_q}</div>", 
-                        unsafe_allow_html=True
+                        f"<div class='assistant-bubble'>{follow_q}</div>",
+                        unsafe_allow_html=True,
                     )
 
         else:
-            # fallback
+            # Fallback: show raw text
             with st.chat_message("assistant"):
-                st.markdown(f"<div class='assistant-bubble'>{st.session_state.raw_reco}</div>", unsafe_allow_html=True)
+                st.markdown(
+                    f"<div class='assistant-bubble'>{st.session_state.raw_reco}</div>",
+                    unsafe_allow_html=True,
+                )
 
-        # Follow-up free chat
-        inp = st.chat_input("Ask a follow-up...")
-        if inp:
-            st.session_state.messages.append({"role": "user", "content": inp})
+        # Free-form follow-up input
+        fu = st.chat_input("Ask a follow-up or refine your needs...")
+        if fu:
+            st.session_state.messages.append({"role": "user", "content": fu})
             st.session_state.stage = "reco"
             st.rerun()
 
 
 # ============================================================
-# MODE 2: COMPARE MODELS (+ FOLLOW-UP)
+# MODE 2: COMPARE MODELS (+ FOLLOW-UP & PREDEFINED Qs)
 # ============================================================
 elif st.session_state.mode == "compare":
 
     if st.session_state.stage == "ask_compare":
         with st.chat_message("assistant"):
-            st.markdown("<div class='assistant-bubble'>Which two models do you want to compare?</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='assistant-bubble'>Which two models do you want to compare? (e.g. Baleno vs i20)</div>",
+                unsafe_allow_html=True,
+            )
 
-        inp = st.chat_input("e.g. Baleno vs i20")
+        inp = st.chat_input("Type models to compare...")
         if inp:
             st.session_state.messages.append({"role": "user", "content": inp})
             st.session_state.stage = "run_compare"
@@ -358,7 +369,7 @@ elif st.session_state.mode == "compare":
 
     elif st.session_state.stage == "run_compare":
         with st.chat_message("assistant"):
-            with st.spinner("Comparing models..."):
+            with st.spinner("Comparing these cars..."):
                 msgs = [{"role": "system", "content": COMPARE_PROMPT}] + st.session_state.messages
                 raw = call_llm(msgs)
 
@@ -377,27 +388,26 @@ elif st.session_state.mode == "compare":
                     st.markdown(
                         f"""
                         <div class='car-card'>
-                            <h4>{car1['name']}</h4>
+                            <h4>{car1.get('name','')}</h4>
                             <b>Pros:</b>
-                            <ul>{''.join([f"<li>{p}</li>" for p in car1['pros']])}</ul>
+                            <ul>{''.join([f"<li>{p}</li>" for p in car1.get('pros',[])])}</ul>
                             <b>Cons:</b>
-                            <ul>{''.join([f"<li>{c}</li>" for c in car1['cons']])}</ul>
-                            <p><b>Summary:</b> {car1['summary']}</p>
+                            <ul>{''.join([f"<li>{c}</li>" for c in car1.get('cons',[])])}</ul>
+                            <p><b>Summary:</b> {car1.get('summary','')}</p>
                         </div>
                         """,
                         unsafe_allow_html=True,
                     )
-
                 with c2:
                     st.markdown(
                         f"""
                         <div class='car-card'>
-                            <h4>{car2['name']}</h4>
+                            <h4>{car2.get('name','')}</h4>
                             <b>Pros:</b>
-                            <ul>{''.join([f"<li>{p}</li>" for p in car2['pros']])}</ul>
+                            <ul>{''.join([f"<li>{p}</li>" for p in car2.get('pros',[])])}</ul>
                             <b>Cons:</b>
-                            <ul>{''.join([f"<li>{c}</li>" for c in car2['cons']])}</ul>
-                            <p><b>Summary:</b> {car2['summary']}</p>
+                            <ul>{''.join([f"<li>{c}</li>" for c in car2.get('cons',[])])}</ul>
+                            <p><b>Summary:</b> {car2.get('summary','')}</p>
                         </div>
                         """,
                         unsafe_allow_html=True,
@@ -408,7 +418,6 @@ elif st.session_state.mode == "compare":
                         f"<div class='assistant-bubble'>🏆 <b>Winner:</b> {winner}<br>{reason}</div>",
                         unsafe_allow_html=True,
                     )
-
         else:
             with st.chat_message("assistant"):
                 st.markdown(f"<div class='assistant-bubble'>{raw}</div>", unsafe_allow_html=True)
@@ -419,33 +428,42 @@ elif st.session_state.mode == "compare":
     elif st.session_state.stage == "compare_followup":
         with st.chat_message("assistant"):
             st.markdown(
-                "<div class='assistant-bubble'>Want to explore more?</div>",
+                "<div class='assistant-bubble'>Anything else I can compare or clarify?</div>",
                 unsafe_allow_html=True,
             )
 
         col1, col2 = st.columns(2)
 
         if col1.button("Compare variants"):
-            st.session_state.messages.append({"role": "user", "content": "Compare the variants of both cars."})
+            st.session_state.messages.append(
+                {"role": "user", "content": "Compare the variants of these cars."}
+            )
             st.session_state.stage = "run_compare"
             st.rerun()
 
         if col1.button("Cheaper rivals"):
-            st.session_state.messages.append({"role": "user", "content": "Show cheaper rivals."})
+            st.session_state.messages.append(
+                {"role": "user", "content": "Show cheaper alternatives to these cars."}
+            )
             st.session_state.stage = "run_compare"
             st.rerun()
 
         if col2.button("Premium rivals"):
-            st.session_state.messages.append({"role": "user", "content": "Show premium competitions."})
+            st.session_state.messages.append(
+                {"role": "user", "content": "Show more premium competitors for these cars."}
+            )
             st.session_state.stage = "run_compare"
             st.rerun()
 
         if col2.button("Which is safer?"):
-            st.session_state.messages.append({"role": "user", "content": "Which one is safer?"})
+            st.session_state.messages.append(
+                {"role": "user", "content": "Which car is safer and better built?"}
+            )
             st.session_state.stage = "run_compare"
             st.rerun()
 
-        usr = st.chat_input("Ask a follow-up...")
+        # Free-form follow-up
+        usr = st.chat_input("Ask anything about these cars...")
         if usr:
             st.session_state.messages.append({"role": "user", "content": usr})
             st.session_state.stage = "run_compare"
@@ -453,78 +471,101 @@ elif st.session_state.mode == "compare":
 
 
 # ============================================================
-# MODE 3: BUYING TIPS (+ FOLLOW-UP)
+# MODE 3: BUYING TIPS (+ FOLLOW-UP & PREDEFINED Qs)
 # ============================================================
-elif st.session_state.stage == "give_tips":
+elif st.session_state.mode == "tips":
 
-    # RUN LLM EXACTLY ONCE
-    tips = st.session_state.get("generated_tips")
+    TIPS_Q = {
+        "tq1": "Who are you buying the car for?",
+        "tq2": "What’s the driving style (calm, fast, mixed)?",
+        "tq3": "How many km/day do you drive?",
+        "tq4": "Top priorities: mileage, safety, comfort, features, low maintenance?",
+    }
 
-    if not tips:
+    # ---- Ask initial 4 questions ----
+    if st.session_state.stage in TIPS_Q:
+        q = TIPS_Q[st.session_state.stage]
         with st.chat_message("assistant"):
-            with st.spinner("Preparing personalized tips..."):
-                msgs = [{"role": "system", "content": TIPS_PROMPT}] + st.session_state.messages
-                tips = call_llm(msgs)
+            st.markdown(f"<div class='assistant-bubble'>{q}</div>", unsafe_allow_html=True)
 
-        # SAVE RESULT (prevents re-running)
-        st.session_state.generated_tips = tips
+        ans = st.chat_input("Your answer...")
+        if ans:
+            st.session_state.messages.append({"role": "user", "content": ans})
+            st.session_state.prefs[st.session_state.stage] = ans
+            idx = int(st.session_state.stage[2:])
+            st.session_state.stage = "give_tips" if idx == 4 else f"tq{idx+1}"
+            st.rerun()
 
-        # DISPLAY RESULT
-        with st.chat_message("assistant"):
-            st.markdown(f"<div class='assistant-bubble'>{tips}</div>", unsafe_allow_html=True)
-
-        # move forward
-        st.session_state.stage = "tips_followup"
-        st.rerun()
-
-    else:
-        # If user returns here, show last tips
-        with st.chat_message("assistant"):
-            st.markdown(f"<div class='assistant-bubble'>{tips}</div>", unsafe_allow_html=True)
-
-        st.session_state.stage = "tips_followup"
-        st.rerun()
-
-
+    # ---- Generate tips (runs LLM, uses generated_tips for reuse) ----
     elif st.session_state.stage == "give_tips":
-        with st.chat_message("assistant"):
-            with st.spinner("Preparing personalized tips..."):
-                msgs = [{"role": "system", "content": TIPS_PROMPT}] + st.session_state.messages
-                tips = call_llm(msgs)
+        tips = st.session_state.generated_tips
 
-            st.markdown(f"<div class='assistant-bubble'>{tips}</div>", unsafe_allow_html=True)
+        if not tips:
+            with st.chat_message("assistant"):
+                with st.spinner("Preparing personalized tips..."):
+                    msgs = [{"role": "system", "content": TIPS_PROMPT}] + st.session_state.messages
+                    tips = call_llm(msgs)
 
-        st.session_state.stage = "tips_followup"
-        st.rerun()
+            st.session_state.generated_tips = tips
 
+            with st.chat_message("assistant"):
+                st.markdown(f"<div class='assistant-bubble'>{tips}</div>", unsafe_allow_html=True)
+
+            st.session_state.stage = "tips_followup"
+            st.rerun()
+        else:
+            # If already generated, just show them and move to followup
+            with st.chat_message("assistant"):
+                st.markdown(f"<div class='assistant-bubble'>{tips}</div>", unsafe_allow_html=True)
+            st.session_state.stage = "tips_followup"
+            st.rerun()
+
+    # ---- Follow-up with predefined buttons + chat ----
     elif st.session_state.stage == "tips_followup":
         with st.chat_message("assistant"):
-            st.markdown("<div class='assistant-bubble'>Anything more I can help with?</div>", unsafe_allow_html=True)
+            st.markdown(
+                "<div class='assistant-bubble'>Anything else I can help you with?</div>",
+                unsafe_allow_html=True,
+            )
 
         col1, col2 = st.columns(2)
 
         if col1.button("How to test drive?"):
-            st.session_state.messages.append({"role": "user", "content": "Give me tips for test driving."})
+            st.session_state.messages.append(
+                {"role": "user", "content": "Give me tips on how to do a proper test drive."}
+            )
+            st.session_state.generated_tips = None
             st.session_state.stage = "give_tips"
             st.rerun()
 
         if col1.button("New vs Used?"):
-            st.session_state.messages.append({"role": "user", "content": "Should I buy new or used?"})
+            st.session_state.messages.append(
+                {"role": "user", "content": "Should I buy new or used? Which is better for me?"}
+            )
+            st.session_state.generated_tips = None
             st.session_state.stage = "give_tips"
             st.rerun()
 
         if col2.button("Resale value?"):
-            st.session_state.messages.append({"role": "user", "content": "Which cars have better resale?"})
+            st.session_state.messages.append(
+                {"role": "user", "content": "Which types of cars have better resale value?"}
+            )
+            st.session_state.generated_tips = None
             st.session_state.stage = "give_tips"
             st.rerun()
 
         if col2.button("Maintenance tips"):
-            st.session_state.messages.append({"role": "user", "content": "How to reduce maintenance cost?"})
+            st.session_state.messages.append(
+                {"role": "user", "content": "How can I reduce long-term maintenance costs?"}
+            )
+            st.session_state.generated_tips = None
             st.session_state.stage = "give_tips"
             st.rerun()
 
-        ask = st.chat_input("Ask anything...")
+        # Free-form follow-up
+        ask = st.chat_input("Ask anything about buying a car...")
         if ask:
             st.session_state.messages.append({"role": "user", "content": ask})
+            st.session_state.generated_tips = None
             st.session_state.stage = "give_tips"
             st.rerun()
