@@ -17,6 +17,37 @@ st.set_page_config(
     layout="centered"
 )
 
+def show_followup(question_text=None, mode="guide"):
+    """Always show a follow-up question above the chat input."""
+
+    fallback_questions = {
+        "guide": [
+            "Would you like to compare these cars?",
+            "Want me to suggest cheaper or premium alternatives?",
+            "Should I shortlist the best value model for you?",
+        ],
+        "compare": [
+            "Do you want me to compare variants?",
+            "Would you like cheaper or premium alternatives?",
+            "Should I check which one is better for long-term ownership?",
+        ],
+        "tips": [
+            "Want more tips on test driving?",
+            "Need help choosing between new vs used?",
+            "Want me to suggest ideal segments for you?",
+        ],
+    }
+
+    import random
+    if not question_text:
+        question_text = random.choice(fallback_questions.get(mode, fallback_questions["guide"]))
+
+    with st.chat_message("assistant"):
+        st.markdown(
+            f"<div class='assistant-bubble'>{question_text}</div>",
+            unsafe_allow_html=True
+        )
+
 API_KEY = st.secrets.get("OPENROUTER_API_KEY") or os.getenv("OPENROUTER_API_KEY")
 if not API_KEY:
     st.error("❌ OPENROUTER_API_KEY missing")
