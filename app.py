@@ -18,344 +18,344 @@ if not API_KEY:
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 SPINNY_RED = "#E11B22"
-LIGHT_GREY = "#F5F5F5"
+LIGHT_GREY = "#F7F7F7"
 
-# ---------------- CUSTOM CSS ----------------
+# ---------------- CSS ----------------
 st.markdown(
     f"""
     <style>
         body {{ background-color: {LIGHT_GREY}; }}
         .block-container {{
-            max-width: 780px !important;
-            padding-top: 1.5rem;
-            padding-bottom: 4rem;
+            max-width: 780px;
+            padding-top: 1.2rem;
+            padding-bottom: 3rem;
         }}
         .chat-bubble {{
-            padding: 0.75rem 1rem;
-            border-radius: 16px;
-            margin-bottom: 0.5rem;
+            padding: 0.8rem 1rem;
+            border-radius: 14px;
+            margin-bottom: 0.4rem;
             max-width: 90%;
-            font-size: 0.95rem;
-            line-height: 1.4;
         }}
         .assistant-bubble {{
-            background-color: #fff;
+            background-color: white;
             border: 1px solid #e5e7eb;
-            color: #111;
         }}
         .user-bubble {{
             background-color: {SPINNY_RED};
             color: white;
             margin-left: auto;
         }}
+        /* Side-by-side comparison */
+        .compare-container {{
+            display: flex;
+            gap: 15px;
+            margin-top: 15px;
+            margin-bottom: 15px;
+        }}
+        .compare-card {{
+            flex: 1;
+            background: white;
+            padding: 14px;
+            border-radius: 14px;
+            border: 1px solid #ddd;
+        }}
+        .compare-title {{
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 6px;
+        }}
+        .badge-winner {{
+            background: #4CAF50;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 8px;
+            font-size: 0.75rem;
+            float: right;
+        }}
+        .alt-buttons {{
+            margin-top: 10px;
+        }}
+        .alt-btn {{
+            background: #FFF4F4;
+            border: 1px solid #FDE0E0;
+            padding: 6px 10px;
+            border-radius: 8px;
+            margin-right: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }}
     </style>
-    """,
+""",
     unsafe_allow_html=True,
 )
 
-# ---------------- SESSION STATE ----------------
-if "mode" not in st.session_state:
-    st.session_state.mode = None          # choose / compare / tips
-if "stage" not in st.session_state:
-    st.session_state.stage = "init"
-if "prefs" not in st.session_state:
-    st.session_state.prefs = {}
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "followup_asked" not in st.session_state:
-    st.session_state.followup_asked = False
+# ---------------- SESSION ----------------
+if "mode" not in st.session_state: st.session_state.mode = None
+if "stage" not in st.session_state: st.session_state.stage = "init"
+if "prefs" not in st.session_state: st.session_state.prefs = {}
+if "messages" not in st.session_state: st.session_state.messages = []
+if "followup_asked" not in st.session_state: st.session_state.followup_asked = False
+if "last_recommendation" not in st.session_state: st.session_state.last_recommendation = ""
 
 # ---------------- SYSTEM PROMPTS ----------------
 
-# For guided car selection + follow-ups
 CONSULTANT_PROMPT = """
-You are an Indian car buying consultant.
+You are an Indian car buying consultant. 
+Use the user's context and preferences to recommend 2–4 cars.
 
-The app has already collected these details from the user:
-- First car or not
-- Primary driver
-- Budget
-- City
-- Family size
-- Daily running
-- Usage (city / highway / mixed)
-- Road quality
-- Fuel preference
-- Transmission
-- Priorities (mileage, safety, comfort, features, low maintenance, performance)
+Format your response in structured JSON with keys:
+cars: list of car objects 
+each car contains:
+  - name
+  - segment
+  - summary
+  - pros (list)
+  - cons (list)
+  - price_band
+  - ideal_for
 
-Your job:
-1. Use these details to recommend 2–4 specific car models available in India.
-2. For each car, clearly show:
-   - Segment (e.g., premium hatchback, compact SUV)
-   - One-line summary
-   - Pros (bullet points)
-   - Cons (bullet points)
-   - Who this car is best for (1 line)
-3. Tie your reasoning back to the user's profile ("Since you drive 40 km/day in city traffic and prefer comfort + automatic...").
+ALSO suggest:
+  - cheaper_alternatives (list of names)
+  - premium_alternatives (list of names)
+  - followup_question (1 natural question)
 
-If the user asks follow-up questions, refine or adjust recommendations, compare options, or suggest alternatives. 
-Keep answers concise, friendly, and practical.
+Keep answers short, clean, and practical.
 """
 
-# For comparison mode
 COMPARE_PROMPT = """
-You are an expert car comparison specialist in India.
+You are an Indian car expert. Compare two cars thoroughly but briefly.
+Format your output in JSON:
 
-User will give 2–3 car model names.
-
-Compare them on:
-- Mileage
-- Comfort
-- Build quality
-- Safety
-- Features
-- Ride quality
-- Performance
-- Maintenance cost
-- Resale value
-
-End with: "Winner based on your needs: ___" and explain why.
-Keep it short and readable.
+{
+ "cars": [
+   {
+     "name": "...",
+     "pros": ["..."],
+     "cons": ["..."],
+     "verdict": "short summary"
+   },
+   {... second car ...}
+ ],
+ "winner": "Car name",
+ "reason": "why it's better for the user"
+}
 """
 
-# For tips mode
 TIPS_PROMPT = """
-You are a helpful Indian car buying advisor.
-
-The app collects a few details:
-- Who they are buying for
-- Driving style
-- Daily running
-- Priorities (mileage / safety / comfort / features)
-
-Based on that, give 5–8 practical tips on:
-- How to shortlist the right segment
-- What to test during a test drive
-- Common mistakes to avoid
-- Fuel / transmission choices
-- Safety and budget balance
-
-Keep tone friendly and simple.
+Generate short, personalised car buying tips based on user answers.
+Return plain text suggestions in 6–8 bullet points.
 """
 
 
-# ---------------- OPENROUTER CALL ----------------
+# ---------------- OPENROUTER ----------------
 def call_llm(messages):
     payload = {
         "model": "tngtech/deepseek-r1t2-chimera:free",
         "messages": messages,
-        "temperature": 0.25,
+        "temperature": 0.3,
     }
-
     headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
-    response = requests.post(OPENROUTER_URL, headers=headers, data=json.dumps(payload))
-
-    if response.status_code != 200:
-        return "⚠️ Error from LLM: " + response.text
-
-    return response.json()["choices"][0]["message"]["content"]
+    r = requests.post(OPENROUTER_URL, headers=headers, data=json.dumps(payload))
+    if r.status_code != 200:
+        return None
+    return r.json()["choices"][0]["message"]["content"]
 
 
-# ---------------- FOLLOW-UP QUESTION ENGINE (for choose mode) ----------------
-def get_followup_question():
+# ---------------- FOLLOW-UP LOGIC ----------------
+def smart_followup():
     prefs = st.session_state.prefs
 
-    # Budget-based follow-up
-    if "q3" in prefs and "lakh" in prefs["q3"].lower():
-        return "Would you like to explore a bit above or below your budget to see better value options?"
-
-    # Safety-focused
     if "q11" in prefs and "safety" in prefs["q11"].lower():
-        return "Since safety is important to you, should I focus only on cars with strong safety ratings (like 4–5 star NCAP)?"
+        return "Since safety is your top priority, should I limit suggestions to 4–5 star rated cars?"
 
-    # High daily running
     if "q6" in prefs:
-        try:
-            daily_km = int("".join(filter(str.isdigit, prefs["q6"])))
-            if daily_km > 30:
-                return "Since your daily running is high, do you want to explore CNG or diesel options as well to save on running costs?"
-        except Exception:
-            pass
+        km = "".join([d for d in prefs["q6"] if d.isdigit()])
+        if km and int(km) > 30:
+            return "Because you drive a lot daily, do you want me to show CNG or diesel options as well?"
 
-    # Family size
     if "q5" in prefs:
-        try:
-            fam = int("".join(filter(str.isdigit, prefs["q5"])))
-            if fam >= 5:
-                return "Would you like me to include 6–7 seater options (like MPVs or bigger SUVs) in your shortlist?"
-        except Exception:
-            pass
+        fam = "".join([d for d in prefs["q5"] if d.isdigit()])
+        if fam and int(fam) >= 5:
+            return "Would you like to explore 6–7 seater options too?"
 
-    # City-specific traffic
-    if "q4" in prefs:
-        city = prefs["q4"].lower()
-        if any(c in city for c in ["bangalore", "bengaluru", "mumbai", "delhi", "pune", "hyderabad"]):
-            return "Since traffic is usually heavy in your city, would you prefer I prioritise automatic options for convenience?"
-
-    # Bad roads
-    if "q8" in prefs and any(w in prefs["q8"].lower() for w in ["bad", "broken", "potholes", "speed breaker"]):
-        return "As your roads aren't great, should I focus on cars with good ground clearance and suspension?"
-
-    # Default fallback
-    return "Would you like me to compare your top 2 options in detail, or suggest a few alternatives in the same budget?"
+    return "Would you like me to compare your top options or show alternatives?"
 
 
-# ---------------- FIRST SCREEN (MODE SELECTION) ----------------
+# ---------------- MODE SELECT SCREEN ----------------
 if st.session_state.stage == "init":
     st.markdown("## 🚗 Spinny AI Car Advisor\nHow can I help you today?")
-    choice = st.radio(
-        "Choose an option:",
-        [
-            "Guide me to choose the perfect car",
-            "Compare different car models",
-            "Tips for buying a car",
-        ],
+    mode = st.radio(
+        "",
+        ["Guide me to choose a car", "Compare models", "Car buying tips"]
     )
-
     if st.button("Continue ➡️"):
-        if choice.startswith("Guide"):
+        if "Guide" in mode:
             st.session_state.mode = "choose"
             st.session_state.stage = "q1"
-        elif choice.startswith("Compare"):
+        elif "Compare" in mode:
             st.session_state.mode = "compare"
             st.session_state.stage = "ask_models"
         else:
             st.session_state.mode = "tips"
             st.session_state.stage = "tq1"
         st.rerun()
-
     st.stop()
 
-
-# ---------------- SIDEBAR: USER PROFILE ----------------
+# ---------------- SIDEBAR ----------------
 with st.sidebar:
-    st.markdown("### 🧾 Your Answers")
+    st.title("📝 Your Profile")
     if st.session_state.prefs:
         for k, v in st.session_state.prefs.items():
-            label = k.replace("_", " ").upper()
-            st.write(f"**{label}**: {v}")
-    else:
-        st.caption("Start answering and I’ll build your profile here. 🙂")
-
-    if st.button("🔁 Reset"):
-        # clear everything
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
+            st.write(f"**{k.upper()}**: {v}")
+    if st.button("Reset"):
+        for k in list(st.session_state.keys()):
+            del st.session_state[k]
         st.rerun()
 
 
-# ---------------- CHAT HISTORY RENDER ----------------
+# ---------------- CHAT RENDER ----------------
 for msg in st.session_state.messages:
-    role = msg["role"]
-    bubble = "assistant-bubble" if role == "assistant" else "user-bubble"
-    with st.chat_message(role):
+    bubble = "assistant-bubble" if msg["role"] == "assistant" else "user-bubble"
+    with st.chat_message(msg["role"]):
         st.markdown(
             f"<div class='chat-bubble {bubble}'>{msg['content']}</div>",
             unsafe_allow_html=True,
         )
 
 
-# ---------------- MODE 1: GUIDED CAR SELECTION ----------------
+# ---------------------------------------------------------------------
+#  MODE: CAR SELECTION (GUIDED)
+# ---------------------------------------------------------------------
 if st.session_state.mode == "choose":
 
     QUESTIONS = {
-        "q1": "Is this your first car or have you owned one before?",
-        "q2": "Who will drive the car most of the time — you, a family member, or a chauffeur?",
-        "q3": "What's your budget range? (e.g., 6–8 lakhs, 10–12 lakhs)",
-        "q4": "Which city do you live in or where will you mainly use the car?",
-        "q5": "How many family members usually travel in the car?",
-        "q6": "On average, how many kilometers do you drive per day?",
-        "q7": "Is your usage mostly city, mostly highway, or a mix of both?",
-        "q8": "How are the typical roads — mostly smooth, or a lot of bad roads and speed breakers?",
-        "q9": "Do you have a fuel preference (Petrol / Diesel / CNG / Electric), or are you open to suggestions?",
-        "q10": "Do you prefer manual or automatic transmission?",
-        "q11": "What matters most to you? (Mileage / Safety / Comfort / Features / Low maintenance / Performance)",
+        "q1": "Is this your first car?",
+        "q2": "Who will drive it most of the time?",
+        "q3": "What’s your budget? (e.g. 6–8 lakhs)",
+        "q4": "Which city do you stay in?",
+        "q5": "How many people usually travel?",
+        "q6": "How many km do you drive in a day?",
+        "q7": "Is your usage mostly city, highway, or mixed?",
+        "q8": "Are your roads mostly smooth or rough?",
+        "q9": "Any fuel preference?",
+        "q10": "Manual or automatic?",
+        "q11": "What's your priority? Mileage / Safety / Comfort / Features?",
     }
 
-    # STAGE: asking fixed questions
+    # Ask Q&A
     if st.session_state.stage in QUESTIONS:
-        q_text = QUESTIONS[st.session_state.stage]
+        question = QUESTIONS[st.session_state.stage]
 
-        # Show current question as assistant bubble (but don't duplicate in messages)
         with st.chat_message("assistant"):
-            st.markdown(
-                f"<div class='chat-bubble assistant-bubble'>{q_text}</div>",
-                unsafe_allow_html=True,
-            )
+            st.markdown(f"<div class='chat-bubble assistant-bubble'>{question}</div>", unsafe_allow_html=True)
 
         user_input = st.chat_input("Your answer...")
         if user_input:
-            # Save answer in prefs
-            st.session_state.prefs[st.session_state.stage] = user_input
-            # Add user message to history
             st.session_state.messages.append({"role": "user", "content": user_input})
+            st.session_state.prefs[st.session_state.stage] = user_input
 
-            # Move to next stage
-            current_idx = int(st.session_state.stage[1:])
-            if current_idx >= len(QUESTIONS):
-                st.session_state.stage = "recommend"
-            else:
-                st.session_state.stage = f"q{current_idx + 1}"
-
+            idx = int(st.session_state.stage[1:])
+            st.session_state.stage = "recommend" if idx == 11 else f"q{idx + 1}"
             st.rerun()
 
-    # STAGE: initial recommendation
+    # Generate first recommendation
     elif st.session_state.stage == "recommend":
         with st.chat_message("assistant"):
-            with st.spinner("Analyzing your needs and shortlisting cars..."):
+            with st.spinner("Shortlisting the perfect cars for you..."):
                 msgs = [{"role": "system", "content": CONSULTANT_PROMPT}] + st.session_state.messages
-                reply = call_llm(msgs)
+                raw = call_llm(msgs)
 
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            st.markdown(
-                f"<div class='chat-bubble assistant-bubble'>{reply}</div>",
-                unsafe_allow_html=True,
-            )
+            st.session_state.last_recommendation = raw
+            st.session_state.messages.append({"role": "assistant", "content": "Here are your best-fit cars 👇"})
+            st.rerun()
 
-        # After first recommendation, go into follow-up mode
-        st.session_state.stage = "follow_up"
-        st.session_state.followup_asked = False
-        st.rerun()
+    # Render recommendation in SPINNY CARD STYLE
+    elif st.session_state.stage == "follow_up" or st.session_state.last_recommendation:
+        try:
+            data = json.loads(st.session_state.last_recommendation)
+        except:
+            st.error("Model returned invalid format.")
+            st.stop()
 
-    # STAGE: follow-up logic
-    elif st.session_state.stage == "follow_up":
-        # If we haven't asked a follow-up yet, generate one and show it once
+        cars = data.get("cars", [])
+        cheaper = data.get("cheaper_alternatives", [])
+        premium = data.get("premium_alternatives", [])
+
+        # Render each car as a SPINNY card
+        for car in cars:
+            with st.chat_message("assistant"):
+                st.markdown(
+                    f"""
+                    <div style='background:white;padding:15px;border-radius:12px;border:1px solid #ddd;margin-bottom:12px;'>
+                        <h4 style='margin:0;'>{car['name']} </h4>
+                        <div style='color:#666;font-size:0.9rem;'>{car['segment']}</div>
+                        <p style='margin-top:8px;font-size:0.9rem;'>{car['summary']}</p>
+                        <b>Pros:</b>
+                        <ul>{''.join([f"<li>{p}</li>" for p in car['pros']])}</ul>
+                        <b>Cons:</b>
+                        <ul>{''.join([f"<li>{c}</li>" for c in car['cons']])}</ul>
+                        <b>Best for:</b> {car['ideal_for']}
+                    </div>""",
+                    unsafe_allow_html=True,
+                )
+
+        # Alternative Buttons
+        with st.chat_message("assistant"):
+            st.markdown("<div class='alt-buttons'>", unsafe_allow_html=True)
+
+            if cheaper:
+                if st.button("🔽 Show Cheaper Alternatives"):
+                    user_q = "Show cheaper alternatives"
+                    st.session_state.messages.append({"role": "user", "content": user_q})
+                    st.session_state.stage = "alt-cheap"
+                    st.rerun()
+
+            if premium:
+                if st.button("🔼 Show Premium Alternatives"):
+                    user_q = "Show premium alternatives"
+                    st.session_state.messages.append({"role": "user", "content": user_q})
+                    st.session_state.stage = "alt-prem"
+                    st.rerun()
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+        # Ask follow-up once
         if not st.session_state.followup_asked:
-            follow_q = get_followup_question()
+            follow_q = data.get("followup_question") or smart_followup()
             st.session_state.messages.append({"role": "assistant", "content": follow_q})
             st.session_state.followup_asked = True
             st.rerun()
-        else:
-            # Show the chat (including follow-up question already stored), then take user input
-            user_input = st.chat_input("Ask a question or answer the follow-up...")
-            if user_input:
-                st.session_state.messages.append({"role": "user", "content": user_input})
 
-                with st.chat_message("assistant"):
-                    with st.spinner("Refining suggestions for you..."):
-                        msgs = [{"role": "system", "content": CONSULTANT_PROMPT}] + st.session_state.messages
-                        reply = call_llm(msgs)
-                    st.session_state.messages.append({"role": "assistant", "content": reply})
-                    st.markdown(
-                        f"<div class='chat-bubble assistant-bubble'>{reply}</div>",
-                        unsafe_allow_html=True,
-                    )
-
-                # Stay in follow-up mode for more conversation
-                st.rerun()
+        user_follow_up = st.chat_input("Ask anything or answer the follow-up...")
+        if user_follow_up:
+            st.session_state.messages.append({"role": "user", "content": user_follow_up})
+            st.session_state.stage = "recommend"  # regenerate refined recommendations
+            st.rerun()
 
 
-# ---------------- MODE 2: CAR MODEL COMPARISON ----------------
+# ---------------------------------------------------------------------
+#  MODE: ALTERNATIVES (Cheaper / Premium)
+# ---------------------------------------------------------------------
+if st.session_state.stage in ["alt-cheap", "alt-prem"]:
+    with st.chat_message("assistant"):
+        with st.spinner("Searching for alternatives..."):
+            msgs = [{"role": "system", "content": CONSULTANT_PROMPT}] + st.session_state.messages
+            alt_raw = call_llm(msgs)
+
+    st.session_state.last_recommendation = alt_raw
+    st.session_state.stage = "follow_up"
+    st.rerun()
+
+
+# ---------------------------------------------------------------------
+#  MODE: COMPARISON (SIDE-BY-SIDE)
+# ---------------------------------------------------------------------
 if st.session_state.mode == "compare":
 
     if st.session_state.stage == "ask_models":
         with st.chat_message("assistant"):
-            st.markdown(
-                "<div class='chat-bubble assistant-bubble'>Which car models would you like to compare? (e.g., Baleno vs i20)</div>",
-                unsafe_allow_html=True,
-            )
-        user_input = st.chat_input("Type models to compare...")
+            st.write("Which two car models do you want to compare?")
+        user_input = st.chat_input("Example: Baleno vs i20")
         if user_input:
             st.session_state.messages.append({"role": "user", "content": user_input})
             st.session_state.stage = "run_compare"
@@ -363,85 +363,91 @@ if st.session_state.mode == "compare":
 
     elif st.session_state.stage == "run_compare":
         with st.chat_message("assistant"):
-            with st.spinner("Comparing models for you..."):
+            with st.spinner("Comparing both models..."):
                 msgs = [{"role": "system", "content": COMPARE_PROMPT}] + st.session_state.messages
-                reply = call_llm(msgs)
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            st.markdown(
-                f"<div class='chat-bubble assistant-bubble'>{reply}</div>",
-                unsafe_allow_html=True,
-            )
+                raw = call_llm(msgs)
 
-        # Mark comparison done
-        st.session_state.stage = "compare_done"
+        try:
+            data = json.loads(raw)
+        except:
+            st.error("Invalid JSON from model.")
+            st.stop()
 
-    elif st.session_state.stage == "compare_done":
-        # Free-form follow-up Q&A in compare context
-        user_input = st.chat_input("Ask more about these models or another comparison...")
-        if user_input:
-            st.session_state.messages.append({"role": "user", "content": user_input})
-            with st.chat_message("assistant"):
-                with st.spinner("Let me help you with that..."):
-                    msgs = [{"role": "system", "content": COMPARE_PROMPT}] + st.session_state.messages
-                    reply = call_llm(msgs)
-                st.session_state.messages.append({"role": "assistant", "content": reply})
+        cars = data["cars"]
+        winner = data["winner"]
+
+        # Render side-by-side cards
+        c1, c2 = st.columns(2)
+        for i, container in enumerate([c1, c2]):
+            car = cars[i]
+            with container:
+                st.markdown("<div class='compare-card'>", unsafe_allow_html=True)
                 st.markdown(
-                    f"<div class='chat-bubble assistant-bubble'>{reply}</div>",
+                    f"<div class='compare-title'>{car['name']}</div>",
                     unsafe_allow_html=True,
                 )
+                st.write("**Pros:**")
+                for p in car["pros"]:
+                    st.write(f"- {p}")
+                st.write("**Cons:**")
+                for c in car["cons"]:
+                    st.write(f"- {c}")
+                if car["name"] == winner:
+                    st.markdown("<span class='badge-winner'>Winner</span>", unsafe_allow_html=True)
+                st.markdown("</div>", unsafe_allow_html=True)
+
+        # winner summary
+        with st.chat_message("assistant"):
+            st.write(f"🏆 **Winner:** {winner}")
+            st.write(data["reason"])
+
+        st.session_state.stage = "compare_followup"
+
+    elif st.session_state.stage == "compare_followup":
+        user_input = st.chat_input("Ask about another comparison or alternatives...")
+        if user_input:
+            st.session_state.messages.append({"role": "user", "content": user_input})
+            st.session_state.stage = "run_compare"
             st.rerun()
 
 
-# ---------------- MODE 3: BUYING TIPS ----------------
+# ---------------------------------------------------------------------
+#  MODE: BUYING TIPS
+# ---------------------------------------------------------------------
 if st.session_state.mode == "tips":
 
-    TIPS_QUESTIONS = {
-        "tq1": "Who are you buying the car for? (e.g., yourself, parents, family, spouse)",
-        "tq2": "How would you describe the driving style? (calm, spirited, mixed)",
-        "tq3": "How many km do you typically drive per day?",
-        "tq4": "What are your top priorities? (mileage, safety, comfort, features, low maintenance)",
+    TIPS_Q = {
+        "tq1": "Who are you buying the car for?",
+        "tq2": "What’s the driving style?",
+        "tq3": "How many km/day?",
+        "tq4": "Your priorities?",
     }
 
-    if st.session_state.stage in TIPS_QUESTIONS:
-        q = TIPS_QUESTIONS[st.session_state.stage]
+    if st.session_state.stage in TIPS_Q:
+        q = TIPS_Q[st.session_state.stage]
         with st.chat_message("assistant"):
-            st.markdown(f"<div class='chat-bubble assistant-bubble'>{q}</div>", unsafe_allow_html=True)
+            st.write(q)
 
         user_input = st.chat_input("Your answer...")
         if user_input:
-            st.session_state.prefs[st.session_state.stage] = user_input
             st.session_state.messages.append({"role": "user", "content": user_input})
-
-            current_idx = int(st.session_state.stage[2:])
-            if current_idx >= len(TIPS_QUESTIONS):
-                st.session_state.stage = "give_tips"
-            else:
-                st.session_state.stage = f"tq{current_idx + 1}"
+            st.session_state.prefs[st.session_state.stage] = user_input
+            idx = int(st.session_state.stage[2:])
+            st.session_state.stage = "give_tips" if idx == 4 else f"tq{idx+1}"
             st.rerun()
 
     elif st.session_state.stage == "give_tips":
         with st.chat_message("assistant"):
-            with st.spinner("Preparing some useful tips for you..."):
+            with st.spinner("Preparing tips for you..."):
                 msgs = [{"role": "system", "content": TIPS_PROMPT}] + st.session_state.messages
                 reply = call_llm(msgs)
-            st.session_state.messages.append({"role": "assistant", "content": reply})
-            st.markdown(
-                f"<div class='chat-bubble assistant-bubble'>{reply}</div>",
-                unsafe_allow_html=True,
-            )
+            st.write(reply)
+
         st.session_state.stage = "tips_done"
 
     elif st.session_state.stage == "tips_done":
-        user_input = st.chat_input("Any follow-up questions about buying a car?")
+        user_input = st.chat_input("Any other doubts about buying a car?")
         if user_input:
             st.session_state.messages.append({"role": "user", "content": user_input})
-            with st.chat_message("assistant"):
-                with st.spinner("Let me help with that..."):
-                    msgs = [{"role": "system", "content": TIPS_PROMPT}] + st.session_state.messages
-                    reply = call_llm(msgs)
-                st.session_state.messages.append({"role": "assistant", "content": reply})
-                st.markdown(
-                    f"<div class='chat-bubble assistant-bubble'>{reply}</div>",
-                    unsafe_allow_html=True,
-                )
+            st.session_state.stage = "give_tips"
             st.rerun()
