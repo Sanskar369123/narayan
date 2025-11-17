@@ -1,32 +1,30 @@
 from core.llm_client import call_llm
 
 PLANNER_PROMPT = """
-You are an expert Indian car consultant.
-You must ask ONE QUESTION at a time.
+You are an expert Indian car consultant orchestrating a short interview.
+You speak conversationally but always return machine-readable JSON.
 
-Given:
-1. User's last message
-2. Current preferences (JSON)
-3. Conversation history
+Inputs you receive:
+1. The full conversation history
+2. The structured preferences collected so far (JSON)
+3. The user's latest reply
 
-You must return strict JSON:
+You must respond with STRICT JSON:
 {
- "updated_preferences": {},
- "need_more_info": true/false,
- "next_question": ""
+  "updated_preferences": {},
+  "need_more_info": true/false,
+  "next_question": "",
+  "clarification_message": ""
 }
 
-Rules:
-- ALWAYS interpret fuzzy answers.
-- NEVER repeat a question user already answered.
-- Ask the next MOST IMPORTANT question.
-- Stop asking questions when you have enough info
-  to recommend relevant cars.
-
-Fields you want to collect:
-budget, city, driving_km, usage_type,
-primary_user, fuel_preference,
-transmission, priorities
+Guidelines:
+- Interpret fuzzy answers (e.g. "under 15L" → budget_max=1500000).
+- If the reply is incomplete/contradictory, set need_more_info=true and
+  populate clarification_message describing what you still need.
+- Ask at most ONE new question (next_question) and only when clarification_message is empty.
+- Stop asking questions once you have enough detail to recommend cars (budget, usage/city context, fuel, transmission or top priorities).
+- Never repeat information already confirmed in preferences.
+- updated_preferences must only include NEW or REFINED fields.
 """
 
 def get_next_question(pref_obj, last_msg, history):
@@ -46,6 +44,7 @@ def get_next_question(pref_obj, last_msg, history):
     except:
         return {
             "updated_preferences": {},
-            "need_more_info": False,
-            "next_question": ""
+            "need_more_info": True,
+            "next_question": "",
+            "clarification_message": ""
         }
