@@ -22,70 +22,87 @@ LIGHT_GREY = "#F7F7F7"
 
 # ---------------- CSS ----------------
 st.markdown(
-    f"""
+    """
     <style>
-        body {{ background-color: {LIGHT_GREY}; }}
-        .block-container {{
-            max-width: 780px;
-            padding-top: 1.2rem;
-            padding-bottom: 3rem;
-        }}
-        .chat-bubble {{
+        /* FORCE LIGHT THEME */
+        :root, body, .main, .block-container {
+            background-color: #F7F7F7 !important;
+            color: #111 !important;
+        }
+
+        /* Sidebar */
+        section[data-testid="stSidebar"] {
+            background-color: #FFFFFF !important;
+        }
+
+        /* Chat message container override */
+        div[data-testid="chat-message"] {
+            color: #111 !important;
+        }
+
+        /* Chat bubbles */
+        .chat-bubble {
             padding: 0.8rem 1rem;
             border-radius: 14px;
-            margin-bottom: 0.4rem;
+            margin-bottom: 0.6rem;
             max-width: 90%;
-        }}
-        .assistant-bubble {{
-            background-color: white;
-            border: 1px solid #e5e7eb;
-        }}
-        .user-bubble {{
-            background-color: {SPINNY_RED};
-            color: white;
+            line-height: 1.45;
+            font-size: 1rem;
+            color: #111 !important;
+        }
+
+        .assistant-bubble {
+            background-color: #FFFFFF !important;
+            border: 1px solid #E0E0E0 !important;
+        }
+
+        .user-bubble {
+            background-color: #E11B22 !important;
+            color: white !important;
             margin-left: auto;
-        }}
-        /* Side-by-side comparison */
-        .compare-container {{
-            display: flex;
-            gap: 15px;
-            margin-top: 15px;
-            margin-bottom: 15px;
-        }}
-        .compare-card {{
-            flex: 1;
-            background: white;
-            padding: 14px;
+        }
+
+        /* Input box */
+        textarea[aria-label="Your answer..."] {
+            background-color: white !important;
+            color: #111 !important;
+        }
+
+        /* Chat input container */
+        div[data-testid="stChatInputContainer"] textarea {
+            background-color: #FFFFFF !important;
+            color: #000000 !important;
+            border-radius: 12px;
+        }
+
+        /* Comparison cards */
+        .compare-card {
+            background: white !important;
             border-radius: 14px;
-            border: 1px solid #ddd;
-        }}
-        .compare-title {{
+            border: 1px solid #DDD !important;
+            padding: 14px;
+            color: #111 !important;
+        }
+
+        .compare-title {
             font-weight: 700;
             font-size: 1.1rem;
             margin-bottom: 6px;
-        }}
-        .badge-winner {{
-            background: #4CAF50;
-            color: white;
-            padding: 4px 8px;
-            border-radius: 8px;
-            font-size: 0.75rem;
-            float: right;
-        }}
-        .alt-buttons {{
-            margin-top: 10px;
-        }}
-        .alt-btn {{
-            background: #FFF4F4;
-            border: 1px solid #FDE0E0;
+            color: #111 !important;
+        }
+
+        /* Buttons for alternatives */
+        .alt-btn {
+            background: #FFECEC;
+            border: 1px solid #F8CACA;
             padding: 6px 10px;
             border-radius: 8px;
-            margin-right: 6px;
-            font-size: 0.85rem;
             cursor: pointer;
-        }}
+            margin-right: 5px;
+        }
+
     </style>
-""",
+    """,
     unsafe_allow_html=True,
 )
 
