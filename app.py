@@ -185,11 +185,15 @@ def smart_followup():
 
 # ---------------- MODE SELECT SCREEN ----------------
 if st.session_state.stage == "init":
-    st.markdown("## 🚗 Spinny AI Car Advisor\nHow can I help you today?")
+    st.markdown("## 🚗 Spinny AI Car Advisor")
+    st.markdown("### How can I help you today?")
+
     mode = st.radio(
-        "",
-        ["Guide me to choose a car", "Compare models", "Car buying tips"]
+        "Choose an option",
+        ["Guide me to choose a car", "Compare models", "Car buying tips"],
+        label_visibility="collapsed"
     )
+
     if st.button("Continue ➡️"):
         if "Guide" in mode:
             st.session_state.mode = "choose"
@@ -201,7 +205,9 @@ if st.session_state.stage == "init":
             st.session_state.mode = "tips"
             st.session_state.stage = "tq1"
         st.rerun()
+
     st.stop()
+
 
 # ---------------- SIDEBAR ----------------
 with st.sidebar:
