@@ -102,6 +102,11 @@ def init_state():
         st.session_state.initial_greeting_shown = False
 
 init_state()
+# --- SAFELY MIGRATE OLD MODES ---
+old_modes = {"guide": "Guide me", "compare": "Compare models", "tips": "Car buying tips"}
+if st.session_state.mode in old_modes:
+    st.session_state.mode = old_modes[st.session_state.mode]
+
 
 # ------------------------------------------------------------
 # SIDEBAR - MODE + PROFILE
