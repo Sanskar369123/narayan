@@ -455,28 +455,36 @@ elif st.session_state.mode == "compare":
 # ============================================================
 # MODE 3: BUYING TIPS (+ FOLLOW-UP)
 # ============================================================
-elif st.session_state.mode == "tips":
+elif st.session_state.stage == "give_tips":
 
-    TIPS_Q = {
-        "tq1": "Who are you buying the car for?",
-        "tq2": "What’s the driving style?",
-        "tq3": "How many km/day?",
-        "tq4": "What are your priorities?"
-    }
+    # RUN LLM EXACTLY ONCE
+    tips = st.session_state.get("generated_tips")
 
-    if st.session_state.stage in TIPS_Q:
-        q = TIPS_Q[st.session_state.stage]
+    if not tips:
         with st.chat_message("assistant"):
-            st.markdown(f"<div class='assistant-bubble'>{q}</div>", unsafe_allow_html=True)
+            with st.spinner("Preparing personalized tips..."):
+                msgs = [{"role": "system", "content": TIPS_PROMPT}] + st.session_state.messages
+                tips = call_llm(msgs)
 
-        ans = st.chat_input("Your answer...")
-        if ans:
-            st.session_state.messages.append({"role": "user", "content": ans})
-            st.session_state.prefs[st.session_state.stage] = ans
+        # SAVE RESULT (prevents re-running)
+        st.session_state.generated_tips = tips
 
-            idx = int(st.session_state.stage[2:])
-            st.session_state.stage = "give_tips" if idx == 4 else f"tq{idx+1}"
-            st.rerun()
+        # DISPLAY RESULT
+        with st.chat_message("assistant"):
+            st.markdown(f"<div class='assistant-bubble'>{tips}</div>", unsafe_allow_html=True)
+
+        # move forward
+        st.session_state.stage = "tips_followup"
+        st.rerun()
+
+    else:
+        # If user returns here, show last tips
+        with st.chat_message("assistant"):
+            st.markdown(f"<div class='assistant-bubble'>{tips}</div>", unsafe_allow_html=True)
+
+        st.session_state.stage = "tips_followup"
+        st.rerun()
+
 
     elif st.session_state.stage == "give_tips":
         with st.chat_message("assistant"):
